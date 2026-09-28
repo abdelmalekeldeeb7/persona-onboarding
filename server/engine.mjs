@@ -272,7 +272,7 @@ export async function handleEvent(s, ev) {
     closeCards(s, 'incoming_call');
     const missing = !s.userName ? 'what should I call you?' : !s.need ? 'what’s one thing I could help you with?' : null;
     const why = ev.reason === 'unsupported'
-      ? 'This browser doesn’t support voice here (Chrome, Edge or Safari do).'
+      ? 'Voice isn’t available in this browser right now. On a Mac with Safari, turn on Dictation (System Settings, Keyboard, Dictation) and try again, or use Chrome.'
       : 'I couldn’t get access to your microphone.';
     push(s, { role: 'system', text: ev.reason === 'unsupported' ? 'Voice not supported in this browser' : 'Microphone unavailable', via: 'text' });
     return [push(s, { role: 'agent', text: `${why} No problem, we can do this by text.${missing ? ` So, ${missing}` : ''}`, via: 'text' })];
@@ -775,6 +775,7 @@ function labelEnd(reason) {
 function afterHangupLine(s, reason, dur) {
   const missing = !s.userName ? 'your name' : !s.need ? 'what you’d like help with' : `“${s.need}”`;
   if (reason === 'tab_closed') return `The page closed mid-call, so I hung up. Everything’s saved${missing ? `; we were on ${missing}` : ''}. Call back or keep typing.`;
+  if (reason === 'unsupported') return 'Voice stopped: this browser’s speech service is off. On a Mac with Safari, turn on Dictation (System Settings, Keyboard, Dictation), or use Chrome. We can keep going by text.';
   if (reason === 'mic_denied') return 'I couldn’t reach your microphone, so let’s just type. Everything carries over.' + (missing ? ` Last thing I was after: ${missing}.` : '');
   if (reason === 'error') return 'Looks like we got cut off. Call back whenever, or keep going here. Nothing’s lost.';
   if (reason === 'silence') return 'I ended the call since it went quiet. We can pick up right here whenever you’re ready.';

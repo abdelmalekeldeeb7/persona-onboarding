@@ -87,6 +87,12 @@ export class Call {
 
   constructor(h: Handlers, options: CallOptions = {}) { this.h = h; this.synthesize = options.synthesize; }
 
+  /** Call synchronously inside the user's tap: Safari only allows speech/audio started by a gesture. */
+  static unlock() {
+    try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch {}
+    try { const AC = window.AudioContext || (window as any).webkitAudioContext; const ac = new AC(); ac.resume().finally(() => setTimeout(() => ac.close(), 200)); } catch {}
+  }
+
   async start() {
     if (this.active) return;
     if (!SR) { this.finish('unsupported'); return; }
@@ -170,6 +176,10 @@ export class Call {
         }
         const chunk = chunks[i++].trim();
         const u = new SpeechSynthesisUtterance(chunk);
+        let advanced = false;
+        // Safari sometimes never fires onend; move on after a generous estimate of the chunk's length.
+        const guard = setTimeout(() => { if (!advanced) { advanced = true; heardChunks.push(chunk); next(); } }, 2500 + chunk.length * 95);
+        const go = () => { if (advanced) return false; advanced = true; clearTimeout(guard); return true; };
         if (this.voice) u.voice = this.voice;
         u.rate = this.rate;
         u.onboundary = (event: any) => {
@@ -177,12 +187,14 @@ export class Call {
           this.heardText = [...heardChunks, partial].filter(Boolean).join(' ');
         };
         u.onend = () => {
+          if (!go()) return;
           heardChunks.push(chunk);
           this.heardText = heardChunks.join(' ');
           next();
         };
-        u.onerror = next;
-        speechSynthesis.speak(u);
+        u.onerror = () => { if (go()) next(); };
+        if (i === 1) setTimeout(() => { if (token === this.speakToken && this.active) speechSynthesis.speak(u); }, 60);
+        else speechSynthesis.speak(u);
       };
       next();
     });
@@ -271,6 +283,7 @@ export class Call {
     this.sentByIndex.clear();
     this.interimByIndex.clear();
     rec.onresult = (e: any) => {
+      this.recRunning = true;
       if (this.muted) return;
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -328,8 +341,10 @@ export class Call {
       this.endpointTimer = setTimeout(() => this.flush(), wait);
     };
     rec.onstart = () => { this.recRunning = true; this.restarts = 0; };
+    rec.onaudiostart = () => { this.recRunning = true; };
     rec.onerror = (e: any) => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') this.finish('mic_denied');
+      if (e.error === 'service-not-allowed') this.finish('unsupported'); // Safari: Dictation/Siri is off
+      else if (e.error === 'not-allowed') this.finish('mic_denied');
       else if (e.error === 'network' || e.error === 'audio-capture') { if (++this.restarts > 4) this.finish('error'); }
       // 'no-speech' and 'aborted' are routine; onend restarts us.
     };
