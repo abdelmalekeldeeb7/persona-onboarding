@@ -1,6 +1,6 @@
 # Persona Projection
 
-A separate interactive concept: touch the ring on the supplied Band film to project a glass conversation surface. The panel unfolds from the ring; minimizing preserves the conversation. Voice and text occupy the same panel, and Gmail opens as a permission sheet.
+A separate interactive concept: touch the ring on the supplied Band film to project a glass conversation surface. Activation now uses the calibrated film still with a 480ms downward pan/zoom and a 300ms panel entrance, rather than replaying the recorded touch gesture. The panel unfolds from the ring; minimizing preserves the conversation. Voice and text occupy the same panel, and Gmail opens as a permission sheet.
 
 ## Run
 
@@ -32,3 +32,7 @@ Production build and TypeScript check pass; all 23 inherited engine tests pass. 
 Real microphone conversation, real model quality, real Google OAuth and deployment remain unverified. No external accounts have been configured.
 
 Reduced-motion preferences suppress projection and pulse animations; unsupported glass blur falls back to an opaque panel. The ring and all primary actions are keyboard buttons. On phones, the projection expands into a readable sheet.
+
+## Ring alignment correction
+
+At the reported 1395×884 viewport and at 390×844, the hit target remains within one CSS pixel of the calibrated filmed ring before and after activation. The panel is fully visible by 550ms in local automated Chrome checks; repeated minimize/reopen produced no page errors. Video seeking, animated width/left/bottom and entrance blur were removed. This is a 2D camera-style pan of the supplied frame, not a newly rendered viewing angle.

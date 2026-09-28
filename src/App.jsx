@@ -13,7 +13,7 @@ export default function App(){
  const [busy,setBusy]=useState(false),[gmailBusy,setGmailBusy]=useState(false),[sheet,setSheet]=useState(null);
  const [status,setStatus]=useState('idle'),[caption,setCaption]=useState(''),[muted,setMuted]=useState(false),[level,setLevel]=useState(0);
  const [view,setView]=useState('text'),[mediaReady,setMediaReady]=useState(false),[mediaFailed,setMediaFailed]=useState(false);
- const video=useRef(null),call=useRef(null),session=useRef(null),active=useRef(false),end=useRef(null),input=useRef(null),ring=useRef(null),panel=useRef(null),beam=useRef(null),world=useRef(null),serial=useRef(Promise.resolve());
+ const call=useRef(null),session=useRef(null),active=useRef(false),end=useRef(null),input=useRef(null),ring=useRef(null),panel=useRef(null),beam=useRef(null),world=useRef(null),serial=useRef(Promise.resolve());
  const reduced=useReducedMotion(); session.current=state;
  const live=!['idle','ended'].includes(status);
  const agent=state?.agentName||'Your Persona';
@@ -21,14 +21,14 @@ export default function App(){
  useEffect(()=>{let alive=true;(async()=>{try{const [r,c]=await Promise.all([api.resume(),api.config()]);if(!alive)return;apply(r);setConfig(c);preloadGmail(c.googleClientId);const v=voiceSupport();await api.event(r.state.id,{type:'client_caps',voice:v.recognition&&v.synthesis});}catch{if(alive)setError('We couldn’t connect. Refresh to try again.');}})();return()=>{alive=false;};},[]);
  useEffect(()=>{const h=()=>{if(active.current&&session.current)api.beacon(session.current.id,{type:'call_ended',reason:'tab_closed'});};window.addEventListener('pagehide',h);return()=>window.removeEventListener('pagehide',h);},[]);
  useEffect(()=>{end.current?.scrollIntoView({behavior:reduced?'instant':'smooth',block:'nearest'});},[state?.transcript.length,busy,open,view]);
- useEffect(()=>{if(!open)return;const timer=setTimeout(()=>(panel.current?.querySelector('input,textarea')||panel.current?.querySelector('button'))?.focus(),500);const key=e=>{if(e.key==='Escape'){if(sheet)setSheet(null);else{setOpen(false);ring.current?.focus();}}};window.addEventListener('keydown',key);return()=>{clearTimeout(timer);window.removeEventListener('keydown',key);};},[open,sheet]);
+ useEffect(()=>{if(!open)return;const timer=setTimeout(()=>(panel.current?.querySelector('input,textarea')||panel.current?.querySelector('button'))?.focus({preventScroll:true}),380);const key=e=>{if(e.key==='Escape'){if(sheet)setSheet(null);else{setOpen(false);ring.current?.focus();}}};window.addEventListener('keydown',key);return()=>{clearTimeout(timer);window.removeEventListener('keydown',key);};},[open,sheet]);
  useEffect(()=>()=>{active.current=false;call.current?.end('user');},[]);
  // Keep the projection attached to the actual ring while the film and glass move.
- useEffect(()=>{if(!open)return;let frame;let until=performance.now()+1300;
+ useEffect(()=>{if(!open)return;let frame;let until=performance.now()+750;
   const update=()=>{const r=ring.current?.getBoundingClientRect(),p=panel.current?.getBoundingClientRect(),w=world.current?.getBoundingClientRect();
    if(r&&p&&w&&beam.current){const x=r.left+r.width/2-w.left,y=r.top+r.height/2-w.top;beam.current.style.clipPath=`polygon(${x}px ${y}px,${p.left-w.left+5}px ${p.top-w.top+35}px,${p.left-w.left+5}px ${p.bottom-w.top-35}px)`;}
    if(performance.now()<until)frame=requestAnimationFrame(update);
-  }; const resized=()=>{cancelAnimationFrame(frame);until=performance.now()+1000;update();};update();window.addEventListener('resize',resized);return()=>{cancelAnimationFrame(frame);window.removeEventListener('resize',resized);};
+  }; const resized=()=>{cancelAnimationFrame(frame);until=performance.now()+750;update();};update();window.addEventListener('resize',resized);return()=>{cancelAnimationFrame(frame);window.removeEventListener('resize',resized);};
  },[open]);
  const event=async ev=>apply(await api.event(session.current.id,ev));
  const speak=async r=>{if(!active.current)return;const m=[...(r.messages||[])].reverse().find(m=>m.role==='agent');if(m){await call.current?.speak(m.text);if(m.card?.type==='end_call')call.current?.end('agent');}else call.current?.listening();};
@@ -47,9 +47,9 @@ export default function App(){
  };
  const endCall=()=>call.current?.end('user');
  const gmail=async(sample=false)=>{if(gmailBusy)return;setGmailBusy(true);setError('');try{const result=sample?simulatedGmail():await connectGmail(config.googleClientId);await speak(await event({type:'gmail_connected',...result}));setSheet(null);}catch(e){setError('Gmail didn’t connect. You can retry or keep going.');await event({type:'gmail_failed',error:e.message}).catch(()=>{});}finally{setGmailBusy(false);}};
- const awaken=()=>{setOpen(true);if(video.current&&!reduced){video.current.currentTime=4.5;video.current.play().catch(()=>{});}};
- const loadFilm=()=>{if(video.current){video.current.currentTime=4.4;}};
- const timeFilm=()=>{if(video.current?.currentTime>=8.4){video.current.pause();video.current.currentTime=4.4;}};
+ // The filmed touch gesture used to replay after the user's click, causing a second,
+ // delayed activation. Use its calibrated still as the camera surface instead.
+ const awaken=()=>setOpen(true);
  const lastAgent=[...(state?.transcript||[])].reverse().find(m=>m.role==='agent');
  const incoming=!live&&['incoming_call','call_offer'].includes(lastAgent?.card?.type)&&!lastAgent?.card?.closed;
  const decline=async()=>{try{await event({type:'call_declined'});}catch{setError('Couldn’t save that. Please try again.');}};
@@ -60,12 +60,12 @@ export default function App(){
   <main className="world" ref={world}>
    <div className="world-title"><span className="overline">MEET YOUR PERSONA</span><h1>Your world.<br/>A little <em>lighter.</em></h1><p>One touch. A conversation that stays with you.</p></div>
    <div className="film-stage">
-    <video ref={video} src="/hero-1080.mp4" poster="/band-poster.jpg" muted playsInline preload="auto" onLoadedMetadata={loadFilm} onSeeked={()=>setMediaReady(true)} onTimeUpdate={timeFilm} onError={()=>{setMediaReady(true);setMediaFailed(true);}} aria-label="Persona Band on a wrist"/>
+    <img className="band-surface" src="/band-poster.jpg" onLoad={()=>setMediaReady(true)} onError={()=>{setMediaReady(true);setMediaFailed(true);}} alt="Persona Band on a wrist" draggable="false"/>
     <button ref={ring} className={`ring-hit ${mediaReady?'ready':''} ${live?'live':''}`} onClick={open?()=>setOpen(false):awaken} aria-label={open?'Minimize conversation':'Touch the ring to meet your Persona'} aria-expanded={open} aria-controls="projection" style={{'--level':level}}><span className="ring-light"/><span className="ring-ripple"/></button>
     {!open&&<div className="touch-label"><span className="touch-stem"/><button onClick={awaken}>Touch the ring <ArrowUpRight size={13}/></button><small>{mediaFailed?'Video unavailable. You can still start here.':'Your Persona is right here.'}</small></div>}
    </div>
-   <AnimatePresence>{open&&<motion.div ref={beam} className="projection-beam" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} transition={{duration:.7}} aria-hidden="true"/>}</AnimatePresence>
-   <AnimatePresence>{open&&<motion.section id="projection" ref={panel} className="projection glass" aria-label="Your Persona conversation" initial={reduced?{opacity:0}:{opacity:0,scale:.2,x:-180,y:100,rotateY:-15,filter:'blur(12px)'}} animate={{opacity:1,scale:1,x:0,y:0,rotateY:0,filter:'blur(0px)'}} exit={reduced?{opacity:0}:{opacity:0,scale:.15,x:-180,y:100,filter:'blur(10px)'}} transition={{duration:reduced?.1:.65,ease}}>
+   <AnimatePresence>{open&&<motion.div ref={beam} className="projection-beam" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} transition={{duration:reduced?0:.22,delay:reduced?0:.08}} aria-hidden="true"/>}</AnimatePresence>
+   <AnimatePresence>{open&&<motion.section id="projection" ref={panel} className="projection glass" aria-label="Your Persona conversation" initial={reduced?{opacity:0}:{opacity:0,scale:.92,x:-35,y:48}} animate={{opacity:1,scale:1,x:0,y:0}} exit={{opacity:0,scale:.96,x:-16,y:20}} transition={{duration:reduced?0:.3,delay:reduced?0:.08,ease}}>
     <header className="panel-head"><div className="avatar"><Mark/></div><div className="panel-identity"><strong>{agent}</strong><span><i className={live?'active':''}/>{live?muted?'Mic paused':status==='speaking'?'Speaking':status==='thinking'?'Thinking':'Listening':state?.agentName?'Here with you':'A first hello'}</span></div><button className="icon-button" onClick={()=>setSheet('memory')} aria-label="What Persona remembers"><span className="memory-symbol">···</span></button><button className="icon-button" onClick={()=>setOpen(false)} aria-label="Minimize conversation"><Minus size={17}/></button></header>
     {error&&<div className="error" role="alert">{error}<button onClick={()=>setError('')} aria-label="Dismiss error"><X size={13}/></button></div>}
     {!state?<div className="loading">{error?'Please refresh to reconnect.':'Waking up…'}</div>:sheet?<div className="sheet-content"><button className="back" onClick={()=>setSheet(null)}><ChevronLeft size={15}/>Back to conversation</button>
