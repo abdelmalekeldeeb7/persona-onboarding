@@ -49,7 +49,7 @@ export class Call {
   private lastSpokeAt = 0;
   private voice: SpeechSynthesisVoice | null = null;
   private speakToken = 0;
-  private synthesize?: (text: string) => Promise<ArrayBuffer>;
+  private synthesize?: (text: string, signal?: AbortSignal) => Promise<ArrayBuffer>;
   private remoteAudio: HTMLAudioElement | null = null;
   private remoteAudioUrl = '';
 
