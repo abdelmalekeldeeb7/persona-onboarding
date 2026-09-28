@@ -9,10 +9,11 @@ type Handlers = {
   onStatus?: (s: CallStatus) => void;
   onCaption?: (text: string) => void; // live interim transcript
   onUtterance?: (text: string) => void; // a finished user utterance to send
-  onBargeIn?: () => void;
+  onBargeIn?: (heardText: string) => void;
   onLevel?: (level: number) => void; // 0..1 mic level for visuals
   onEnd?: (reason: EndReason, info: { midSpeech: boolean; partial: string }) => void;
   onReprompt?: (text: string, strike: number) => void; // locally generated nudge (silence)
+  onSilenceText?: (strike: number) => string;
 };
 
 type CallOptions = {
@@ -26,8 +27,13 @@ export const voiceSupport = () => ({
   synthesis: typeof window !== 'undefined' && 'speechSynthesis' in window,
 });
 
-const ENDPOINT_MS = 620; // short pause after a recognized phrase before responding
-const SILENCE_MS = 13000;
+// Give people time to finish a thought. Browser speech recognition often emits
+// several partials during one sentence, so interim text gets a longer endpoint.
+const ENDPOINT_MS = 1100;
+const INTERIM_ENDPOINT_MS = 1500;
+const BARGE_CONFIRM_MS = 450;
+const BACKCHANNEL = /^(m+hm+|mm+|uh[- ]?huh|yeah|yep|yes|right|okay|ok|sure|got it|i see)[.!?, ]*$/i;
+const HOLD_ON = /^(please )?(hold on|one sec(?:ond)?|give me a moment|wait a sec(?:ond)?)[.! ]*$/i;
 
 export class Call {
   status: CallStatus = 'idle';
@@ -39,13 +45,17 @@ export class Call {
   private finalBuf = '';
   private interim = '';
   private endpointTimer: any = null;
+  private bargeTimer: any = null;
+  private bargeCandidate = '';
   private silenceTimer: any = null;
   private silenceStrikes = 0;
+  private holdOn = false;
   private restarts = 0;
   private stream: MediaStream | null = null;
   private audioCtx: AudioContext | null = null;
   private raf = 0;
   private speakingText = '';
+  private heardText = '';
   private lastSpokeAt = 0;
   private voice: SpeechSynthesisVoice | null = null;
   private speakToken = 0;
@@ -80,6 +90,7 @@ export class Call {
     this.stopSpeech();
     this.clearSilence();
     this.speakingText = text;
+    this.heardText = '';
     this.set('speaking');
     if (this.synthesize) {
       const controller = new AbortController();
@@ -113,16 +124,26 @@ export class Call {
     const chunks = text.match(/[^.!?]+[.!?]*\s*/g) || [text]; // Chrome cuts off long utterances
     return new Promise((resolve) => {
       let i = 0;
+      const heardChunks: string[] = [];
       const next = () => {
         if (token !== this.speakToken || !this.active) return resolve();
         if (i >= chunks.length) {
           this.spoken();
           return resolve();
         }
-        const u = new SpeechSynthesisUtterance(chunks[i++].trim());
+        const chunk = chunks[i++].trim();
+        const u = new SpeechSynthesisUtterance(chunk);
         if (this.voice) u.voice = this.voice;
         u.rate = this.rate;
-        u.onend = next;
+        u.onboundary = (event: any) => {
+          const partial = chunk.slice(0, event.charIndex || 0).replace(/\s+\S*$/, '').trim();
+          this.heardText = [...heardChunks, partial].filter(Boolean).join(' ');
+        };
+        u.onend = () => {
+          heardChunks.push(chunk);
+          this.heardText = heardChunks.join(' ');
+          next();
+        };
         u.onerror = next;
         speechSynthesis.speak(u);
       };
@@ -147,6 +168,11 @@ export class Call {
       };
       audio.onended = () => done(true);
       audio.onerror = () => done(false);
+      audio.ontimeupdate = () => {
+        if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+        const chars = Math.floor(this.speakingText.length * Math.min(1, audio.currentTime / audio.duration));
+        this.heardText = this.speakingText.slice(0, chars).replace(/\s+\S*$/, '').trim();
+      };
       audio.play().catch(() => done(false));
       if (token !== this.speakToken) { audio.pause(); done(true); }
     });
@@ -169,11 +195,13 @@ export class Call {
   listening() { if (this.active && this.status === 'thinking') { this.set('listening'); this.armSilence(); } }
 
   interrupt() {
+    const heard = this.heardText;
     this.speakToken++;
     this.stopSpeech();
     this.speakingText = '';
     this.lastSpokeAt = Date.now();
     if (this.active) this.set('listening');
+    return heard;
   }
 
   setMuted(m: boolean) {
@@ -204,17 +232,43 @@ export class Call {
       }
       this.interim = this.isEcho(interim) ? '' : interim;
       const live = (this.finalBuf + ' ' + this.interim).trim();
+      if (this.status === 'speaking' && BACKCHANNEL.test(live)) {
+        this.finalBuf = '';
+        this.interim = '';
+        clearTimeout(this.endpointTimer);
+        clearTimeout(this.bargeTimer);
+        this.bargeCandidate = '';
+        this.h.onCaption?.('');
+        return;
+      }
       this.h.onCaption?.(live);
       if (!live) return;
       this.clearSilence();
       this.silenceStrikes = 0;
-      // Barge-in: user starts talking over the agent.
-      if (this.status === 'speaking' && live.split(/\s+/).length >= 2) {
-        this.interrupt();
-        this.h.onBargeIn?.();
+      // Confirm a real, stable phrase before stopping speech. A quick “yeah”
+      // or a recognizer flicker must never cut the user-facing reply off.
+      if (this.status === 'speaking') {
+        const words = live.split(/\s+/).filter(Boolean);
+        const meaningful = words.length >= 3 || (words.length >= 2 && live.length >= 14);
+        if (meaningful) {
+          if (this.bargeCandidate !== live) {
+            this.bargeCandidate = live;
+            clearTimeout(this.bargeTimer);
+            const candidate = live;
+            this.bargeTimer = setTimeout(() => {
+              if (this.status !== 'speaking' || this.bargeCandidate !== candidate) return;
+              const heard = this.interrupt();
+              this.h.onBargeIn?.(heard);
+              this.bargeCandidate = '';
+            }, BARGE_CONFIRM_MS);
+          }
+        } else {
+          clearTimeout(this.bargeTimer);
+          this.bargeCandidate = '';
+        }
       }
       clearTimeout(this.endpointTimer);
-      this.endpointTimer = setTimeout(() => this.flush(), this.finalBuf ? ENDPOINT_MS : 900);
+      this.endpointTimer = setTimeout(() => this.flush(), this.finalBuf ? ENDPOINT_MS : INTERIM_ENDPOINT_MS);
     };
     rec.onerror = (e: any) => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') this.finish('mic_denied');
@@ -235,6 +289,13 @@ export class Call {
     this.interim = '';
     this.h.onCaption?.('');
     if (!text || this.muted) return;
+    if (HOLD_ON.test(text)) {
+      this.holdOn = true;
+      this.silenceStrikes = 0;
+      this.h.onReprompt?.('Of course. Take your time.', 0);
+      void this.speak('Of course. Take your time.');
+      return;
+    }
     this.set('thinking');
     this.h.onUtterance?.(text);
   }
@@ -255,20 +316,30 @@ export class Call {
   private armSilence() {
     this.clearSilence();
     if (!this.active || this.muted) return;
+    const delay = this.holdOn ? 45000 : [25000, 30000, 60000, 12000][Math.min(this.silenceStrikes, 3)];
+    this.holdOn = false;
     this.silenceTimer = setTimeout(async () => {
       if (!this.active || this.status !== 'listening') return;
       this.silenceStrikes++;
       if (this.silenceStrikes === 1) {
-        const t = 'Still there? Take your time.';
+        const t = this.h.onSilenceText?.(1) || 'No rush. I’m still here when you’re ready.';
         this.h.onReprompt?.(t, 1);
+        await this.speak(t);
+      } else if (this.silenceStrikes === 2) {
+        const t = 'Take all the time you need. I’m right here.';
+        this.h.onReprompt?.(t, 2);
+        await this.speak(t);
+      } else if (this.silenceStrikes === 3) {
+        const t = 'I’ll stay on the line a little longer. If you need a moment, just say “hold on.”';
+        this.h.onReprompt?.(t, 3);
         await this.speak(t);
       } else {
         const t = "I'll hang up for now. You can keep going by typing, or call me back anytime.";
-        this.h.onReprompt?.(t, 2);
+        this.h.onReprompt?.(t, 4);
         await this.speak(t);
         this.finish('silence');
       }
-    }, SILENCE_MS);
+    }, delay);
   }
   private clearSilence() { clearTimeout(this.silenceTimer); }
 
@@ -315,6 +386,7 @@ export class Call {
     const midSpeech = !!partial;
     this.active = false;
     clearTimeout(this.endpointTimer);
+    clearTimeout(this.bargeTimer);
     this.clearSilence();
     this.speakToken++;
     this.stopSpeech();
