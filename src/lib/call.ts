@@ -16,7 +16,7 @@ type Handlers = {
 };
 
 type CallOptions = {
-  synthesize?: (text: string) => Promise<ArrayBuffer>;
+  synthesize?: (text: string, signal?: AbortSignal) => Promise<ArrayBuffer>;
 };
 
 const SR: any = typeof window !== 'undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
@@ -26,7 +26,7 @@ export const voiceSupport = () => ({
   synthesis: typeof window !== 'undefined' && 'speechSynthesis' in window,
 });
 
-const ENDPOINT_MS = 1100; // pause that counts as "done talking"
+const ENDPOINT_MS = 620; // short pause after a recognized phrase before responding
 const SILENCE_MS = 13000;
 
 export class Call {
@@ -82,13 +82,25 @@ export class Call {
     this.speakingText = text;
     this.set('speaking');
     if (this.synthesize) {
+      const controller = new AbortController();
       try {
-        const data = await this.synthesize(text);
-        if (token !== this.speakToken || !this.active) return;
-        await this.playGenerated(data, token);
-        if (token !== this.speakToken || !this.active) return;
-        this.spoken();
-        return;
+        const generated = this.synthesize(text, controller.signal)
+          .then((data) => ({ kind: 'audio' as const, data }))
+          .catch((error) => ({ kind: 'failed' as const, error }));
+        // Do not leave a live conversation silent while cloud speech is rendered.
+        const result = await Promise.race([
+          generated,
+          new Promise<{ kind: 'slow' }>((resolve) => setTimeout(() => resolve({ kind: 'slow' }), 850)),
+        ]);
+        if (token !== this.speakToken || !this.active) { controller.abort(); return; }
+        if (result.kind === 'audio') {
+          await this.playGenerated(result.data, token);
+          if (token !== this.speakToken || !this.active) return;
+          this.spoken();
+          return;
+        }
+        // A slow request is canceled so its late audio cannot interrupt the fallback.
+        controller.abort();
       } catch {
         // Network, quota and model failures fall back to the browser voice.
       }
@@ -202,7 +214,7 @@ export class Call {
         this.h.onBargeIn?.();
       }
       clearTimeout(this.endpointTimer);
-      this.endpointTimer = setTimeout(() => this.flush(), ENDPOINT_MS + (this.interim ? 500 : 0));
+      this.endpointTimer = setTimeout(() => this.flush(), this.finalBuf ? ENDPOINT_MS : 900);
     };
     rec.onerror = (e: any) => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') this.finish('mic_denied');
