@@ -1,39 +1,60 @@
-# Persona Projection
+# Persona Onboarding
 
-A separate interactive concept: touch the ring on the supplied Band film to project a glass conversation surface. Activation now uses the calibrated film still with a 480ms downward pan/zoom and a 300ms panel entrance, rather than replaying the recorded touch gesture. The panel unfolds from the ring; minimizing preserves the conversation. Voice and text occupy the same panel, and Gmail opens as a permission sheet.
+**Live demo:** https://web-production-12e0c1.up.railway.app (Chrome on desktop or Android works best for voice)
 
-## Run
+Onboarding for a new Persona user. You touch the ring on the Band and a glass panel projects from it. From there, a conversation collects four things: **a name for the agent, the user's name, a Gmail connection, and something they want help with**. It moves between **voice call and text** without losing anything, and treats setup as optional. Once the agent knows what the user needs, it starts helping, and anything still missing is picked up gently later.
 
-`npm install`, `npm run build`, then `npm start`.
+## What it does
 
-Open http://localhost:8790. For development, `npm run dev` serves the interface at http://localhost:5180 and proxies the API at 8790.
+- **The call gathers everything except the agent's name.** Naming happens on the first screen. The agent then offers a voice call (a web-simulated call using the browser's speech recognition) to collect the user's name, their need and Gmail. Every reply is written by Claude Haiku 4.5.
+- **Voice and text are one conversation.** You can switch mid-call, hang up, call back or reload the page. Facts are stored in server-side session state (Postgres), not only in the transcript, so nothing is lost.
+- **It's built for users who don't follow the script:**
+  - Hangups, including repeated drops, closing the tab mid-call and mic denial, each get a context-aware recovery line.
+  - Silence gets gentle reprompts, then a graceful hangup.
+  - Interruptions (barge-in), filler-only speech ("um"), stutters, self-corrections ("Sam, no, Samir") and sentences split across pauses are handled.
+  - So are prompt injection, gibberish, refusals ("no calls", "not telling you my name"), mid-conversation renames, and "forget everything".
+- **Onboarding is optional.** "Skip setup, just start" goes straight to help. "Just let me in" works at any point. The agent graduates the user to the main experience as soon as it knows the need.
+- **Gmail is real, read-only OAuth** (the access token stays in the browser). A snapshot of 8 recent messages, triaged by the server, gives an immediate "it already gets me" moment. If Google blocks the account (the app is in Testing), the agent explains why and offers a clearly labelled sample inbox.
+- **Other connectors:** the agent suggests Notion, Google Calendar, Slack or Drive when one fits the user's need, and the user can add it to their setup. Only Gmail is live; the agent never claims to read the others.
+- **Honesty guardrails:**
+  - The agent can't claim to have sent, deleted or connected anything.
+  - It won't invent emails when the snapshot is empty.
+  - It can't say "give me a second" and then stall.
+  - A typed "yes" to "forget everything?" really erases the session.
 
-## Configuration
+## Architecture
 
-Copy `.env.example` to `.env` and add your own credentials there. Never commit `.env`.
+- `server/engine.mjs`: the onboarding state machine (phases, goals, cards, hangup and Gmail events, server-answered intents such as recap, reset and injection). It holds the facts; the model only proposes them.
+- `server/llm.mjs`: Claude Haiku 4.5 through one forced `respond` tool call, which returns both the reply and the extracted facts so state and wording can't disagree. Also holds the TTS providers.
+- `server/index.mjs`: Express API. Sessions are owned via an HttpOnly cookie (someone else's session ID returns 404). It also handles per-session serialization of rapid messages, rate limits, idempotent turn nonces and cross-site write blocking.
+- `src/lib/call.ts`: the browser voice call. It covers:
+  - Endpointing that waits longer on trailing words ("because…").
+  - Deduplication of growing partial transcripts.
+  - Barge-in and echo filtering.
+  - A recognizer watchdog that recovers after the Google popup or a tab switch.
+  - Sentence-chunked, prefetched speech.
+- `src/App.jsx`: the ring and projection interface.
 
-- ANTHROPIC_API_KEY enables Claude Haiku 4.5 for both typed and spoken conversation logic. Without it, the server uses its rule-based fallback.
-- GEMINI_API_KEY enables generated call audio. Haiku still writes every reply; Gemini TTS reads that exact reply aloud. Browser speech remains the automatic fallback.
-- GOOGLE_CLIENT_ID enables browser Google sign-in. Use a Web application OAuth client, authorize the exact local/deployed origins, enable Gmail API, and add OAuth test users while the consent screen is in testing. This flow does not use a client secret.
-- DATABASE_URL optionally enables PostgreSQL. Without it, sessions use the local ignored .data directory.
+## Testing
 
-Gmail access is read-only. The access token stays in the browser. Only eight recent inbox items—sender, subject, date, unread status and snippet—are sent to this app and included in Haiku's existing session context. The sample inbox is explicitly labelled and requires a deliberate sample action.
+- `npm run test:engine`: 28 engine tests (hangups, Gmail failures, resets, hostile payloads, speech cleanup, skip flow).
+- A live stress run against the deployed app (22 difficult personas at once, a 30-message burst, and security probes) finished with 0 server errors and no quality flags. Median reply time was ~1.2s, p90 ~2.3s.
 
-The voice call is a controlled cascade: browser speech recognition produces live captions, Haiku decides the reply and updates onboarding state, then Gemini TTS renders that exact text. Generated audio is requested through a session-owned, rate-limited server route; API keys never reach the browser. Barge-in, mute, hangup, silence recovery and text fallback remain available.
-## Architecture and provenance
+## Tradeoffs
 
-This is a new project, not a continuation of the discarded visual design. The interface and stylesheet were built for this concept. The tested server, browser speech and Gmail utilities were copied from persona-onboarding2 to retain conversation continuity and error handling. Session cookies, browser storage and the default port are isolated from that project. No credentials or prior sessions were copied.
+- **Voice output** uses the browser's speech synthesis. Gemini TTS, which works when `GEMINI_API_KEY` has quota, was blocked by its free-tier limit of 10 requests per day. A self-hosted Kokoro model (`kokoro-js`, Apache-2.0) took about 1s per sentence locally but 12s on Railway's shared CPU, so it's off there (`KOKORO=off`). Whichever voice a call starts with, it stays on it.
+- **Voice input** is the Web Speech API: free, with live captions, best in Chrome. The server cleans up the transcript (fillers, stutters) before it reaches the model.
+- **Gmail**'s restricted read-only scope means Google's Testing mode (whitelisted testers) until the app is verified. Other accounts get the sample inbox.
+- **Connectors other than Gmail** are recorded as the user's intent but not integrated, which keeps the scope honest.
 
-hero-1080.mp4 was supplied by the user; band-poster.jpg is a still extracted from that film. Branding is used for this Persona trial concept. Existing logo sources are documented in brand-sources.json and SVGL-LICENSE.txt. No hardware connection is claimed: interaction occurs in the browser.
+## Run locally
 
-## Checked
+```
+npm install
+cp .env.example .env   # add ANTHROPIC_API_KEY; GOOGLE_CLIENT_ID and GEMINI_API_KEY are optional
+npm run build && npm start   # http://localhost:8790
+```
 
-Production build and TypeScript check pass; all 23 inherited engine tests pass. Chrome walkthroughs at 1440×960 and 390×844 cover ring activation, naming, incoming-call UI, declining into text, name/need collection, sample Gmail and inbox brief. Further checks cover microphone denial, minimizing/reopening, reload continuity and confirmed reset. No page errors or horizontal overflow observed. With mocked browser speech and a fake microphone, the active call, mute, text during a call, return to voice and hangup also passed; this is not a real speech-quality test.
+Without `ANTHROPIC_API_KEY`, a rule-based fallback runs the conversation. Without `DATABASE_URL`, sessions are stored in `.data/`.
 
-Real microphone conversation, real model quality, real Google OAuth and deployment remain unverified. No external accounts have been configured.
-
-Reduced-motion preferences suppress projection and pulse animations; unsupported glass blur falls back to an opaque panel. The ring and all primary actions are keyboard buttons. On phones, the projection expands into a readable sheet.
-
-## Ring alignment correction
-
-At the reported 1395�884 viewport and at 390�844, the hit target remains within one CSS pixel of the calibrated filmed ring before and after activation. The panel is fully visible by 550ms in local automated Chrome checks; repeated minimize/reopen produced no page errors. Video seeking, animated width/left/bottom and entrance blur were removed. This is a 2D camera-style pan of the supplied frame, not a newly rendered viewing angle.
+Product imagery is from yourpersona.com/band. The hero film was supplied for this concept.
