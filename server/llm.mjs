@@ -1,13 +1,16 @@
-// Anthropic Messages API via fetch (no SDK). One forced tool call returns both the reply
-// and any extracted facts, so extraction and wording can never disagree.
+// Claude replies via fetch (no SDK). One forced tool call returns both the reply and
+// extracted facts, so state and wording cannot disagree.
 const KEY = () => process.env.ANTHROPIC_API_KEY;
-// Voice needs speed; typed replies can afford a stronger model.
+const GEMINI_KEY = () => process.env.GEMINI_API_KEY;
+// One model owns both surfaces so a call and the text thread share the same judgment.
 const MODEL = (via) => via === 'voice'
   ? process.env.ANTHROPIC_MODEL_VOICE || 'claude-haiku-4-5-20251001'
-  : process.env.ANTHROPIC_MODEL_TEXT || 'claude-sonnet-5';
+  : process.env.ANTHROPIC_MODEL_TEXT || 'claude-haiku-4-5-20251001';
 const BASE = () => (process.env.LLM_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '');
 
-export const llmEnabled = () => !!KEY();
+// A Gemini key by itself enables speech only; it never changes the conversation model.
+export const llmProvider = () => KEY() ? 'anthropic' : null;
+export const llmEnabled = () => !!llmProvider();
 
 const TOOL = {
   name: 'respond',
@@ -27,7 +30,9 @@ const TOOL = {
   },
 };
 
-export async function llmRespond(system, messages, via = 'text') {
+export function llmRespond(system, messages, via = 'text') { return anthropicRespond(system, messages, via); }
+
+async function anthropicRespond(system, messages, via) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), Number(process.env.LLM_TIMEOUT_MS || 15000));
   try {
@@ -53,6 +58,45 @@ export async function llmRespond(system, messages, via = 'text') {
     const block = data.content?.find((b) => b.type === 'tool_use');
     if (!block?.input?.say) throw new Error('no tool output');
     return block.input;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ---------- Gemini speech (the call's voice) ----------
+// The words still come from llmRespond; this only turns them into audio, so every
+// hangup/fact/turn rule on the server stays in charge.
+export const ttsEnabled = () => !!GEMINI_KEY() && process.env.GEMINI_TTS !== 'off';
+
+export async function geminiSpeak(text) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), Number(process.env.TTS_TIMEOUT_MS || 12000));
+  try {
+    const model = process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-lite-tts';
+    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': GEMINI_KEY(), 'Api-Revision': '2026-05-20' },
+      body: JSON.stringify({
+        model,
+        input: [{ type: 'user_input', content: [{
+          type: 'text',
+          text,
+          annotations: [{ type: 'speech_metadata', style: 'warm, calm and conversational; natural phone-call pacing' }],
+        }] }],
+        response_format: { type: 'audio', mime_type: 'audio/wav', delivery: 'inline' },
+        generation_config: {
+          speech_config: [{ voice: process.env.GEMINI_TTS_VOICE || 'Kore' }],
+        },
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    const data = await res.json();
+    const audio = data.outputAudio || data.output_audio || data.steps
+      ?.flatMap((step) => step.content || [])
+      .find((part) => part.type === 'audio' && part.data);
+    if (!audio?.data) throw new Error(`no audio (${data.status || 'no output'})`);
+    return Buffer.from(audio.data, 'base64');
   } finally {
     clearTimeout(timer);
   }

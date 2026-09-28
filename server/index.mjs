@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { initStore, getSession, saveSession } from './store.mjs';
 import { newSession, handleTurn, handleEvent, publicState } from './engine.mjs';
-import { llmEnabled } from './llm.mjs';
+import { llmEnabled, llmProvider, ttsEnabled, geminiSpeak } from './llm.mjs';
 
 const app = express();
 app.set('trust proxy', 1); // Railway terminates TLS at its proxy
@@ -103,7 +103,13 @@ async function load(req, res) {
 }
 
 app.get('/api/config', (_req, res) => {
-  res.json({ googleClientId: process.env.GOOGLE_CLIENT_ID || null, llm: llmEnabled() });
+  res.json({
+    googleClientId: process.env.GOOGLE_CLIENT_ID || null,
+    llm: llmEnabled(),
+    provider: llmProvider(),
+    chatModel: llmProvider() === 'anthropic' ? (process.env.ANTHROPIC_MODEL_TEXT || 'claude-haiku-4-5-20251001') : null,
+    voice: ttsEnabled() ? 'gemini' : 'browser',
+  });
 });
 
 app.post('/api/session', async (req, res) => {
@@ -151,6 +157,23 @@ app.post('/api/session/:id/turn', async (req, res) => {
   }
 });
 
+// Gemini renders Haiku's exact reply. Session ownership prevents this endpoint from
+// becoming an open speech proxy; a fast failure lets the client use browser speech.
+app.post('/api/session/:id/tts', async (req, res) => {
+  const s = await load(req, res); if (!s) return;
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+  if (!ttsEnabled()) return res.status(404).json({ error: 'unavailable' });
+  if (!text || text.length > 600) return res.status(400).json({ error: 'bad text' });
+  if (limited(res, `tts:${s.id}`, 30)) return;
+  try {
+    const audio = await geminiSpeak(text);
+    res.set({ 'content-type': 'audio/wav', 'cache-control': 'no-store' }).send(audio);
+  } catch (e) {
+    console.error('[tts] failed:', e.message);
+    res.status(502).json({ error: 'tts failed' });
+  }
+});
+
 app.post('/api/session/:id/event', async (req, res) => {
   const id = req.params.id;
   if (!ID_RE.test(id)) return res.status(400).json({ error: 'bad id' });
@@ -183,4 +206,4 @@ if (fs.existsSync(dist)) {
 
 const port = Number(process.env.PORT || 8790);
 await initStore();
-app.listen(port, () => console.log(`[persona] http://localhost:${port}  llm=${llmEnabled()}`));
+app.listen(port, () => console.log(`[persona] http://localhost:${port}  llm=${llmProvider() || "fallback"}`));

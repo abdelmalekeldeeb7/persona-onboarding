@@ -12,13 +12,14 @@ Open http://localhost:8790. For development, `npm run dev` serves the interface 
 
 Copy `.env.example` to `.env` and add your own credentials there. Never commit `.env`.
 
-- ANTHROPIC_API_KEY enables model replies. Without it, the server uses its labelled rule-based fallback.
-- ANTHROPIC_MODEL_TEXT and ANTHROPIC_MODEL_VOICE optionally select models available to your account.
-- GOOGLE_CLIENT_ID enables browser Google sign-in. Authorize the exact local/deployed origin in Google Cloud, enable Gmail API, and add OAuth test users where required.
+- ANTHROPIC_API_KEY enables Claude Haiku 4.5 for both typed and spoken conversation logic. Without it, the server uses its rule-based fallback.
+- GEMINI_API_KEY enables generated call audio. Haiku still writes every reply; Gemini TTS reads that exact reply aloud. Browser speech remains the automatic fallback.
+- GOOGLE_CLIENT_ID enables browser Google sign-in. Use a Web application OAuth client, authorize the exact local/deployed origins, enable Gmail API, and add OAuth test users while the consent screen is in testing. This flow does not use a client secret.
 - DATABASE_URL optionally enables PostgreSQL. Without it, sessions use the local ignored .data directory.
 
-Gmail access is read-only. The token stays in the browser, while a small recent inbox snapshot is sent to the app and, when enabled, its model. The sample inbox is explicitly labelled and requires a deliberate sample action.
+Gmail access is read-only. The access token stays in the browser. Only eight recent inbox itemsâ€”sender, subject, date, unread status and snippetâ€”are sent to this app and included in Haiku's existing session context. The sample inbox is explicitly labelled and requires a deliberate sample action.
 
+The voice call is a controlled cascade: browser speech recognition produces live captions, Haiku decides the reply and updates onboarding state, then Gemini TTS renders that exact text. Generated audio is requested through a session-owned, rate-limited server route; API keys never reach the browser. Barge-in, mute, hangup, silence recovery and text fallback remain available.
 ## Architecture and provenance
 
 This is a new project, not a continuation of the discarded visual design. The interface and stylesheet were built for this concept. The tested server, browser speech and Gmail utilities were copied from persona-onboarding2 to retain conversation continuity and error handling. Session cookies, browser storage and the default port are isolated from that project. No credentials or prior sessions were copied.
@@ -35,4 +36,4 @@ Reduced-motion preferences suppress projection and pulse animations; unsupported
 
 ## Ring alignment correction
 
-At the reported 1395×884 viewport and at 390×844, the hit target remains within one CSS pixel of the calibrated filmed ring before and after activation. The panel is fully visible by 550ms in local automated Chrome checks; repeated minimize/reopen produced no page errors. Video seeking, animated width/left/bottom and entrance blur were removed. This is a 2D camera-style pan of the supplied frame, not a newly rendered viewing angle.
+At the reported 1395ï¿½884 viewport and at 390ï¿½844, the hit target remains within one CSS pixel of the calibrated filmed ring before and after activation. The panel is fully visible by 550ms in local automated Chrome checks; repeated minimize/reopen produced no page errors. Video seeking, animated width/left/bottom and entrance blur were removed. This is a 2D camera-style pan of the supplied frame, not a newly rendered viewing angle.

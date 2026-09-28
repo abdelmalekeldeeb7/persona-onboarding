@@ -50,7 +50,19 @@ async function req<T>(path: string, body?: unknown, retries = 2): Promise<T> {
 }
 
 export const api = {
-  config: () => req<{ googleClientId: string | null; llm: boolean }>('/api/config'),
+  config: () => req<{ googleClientId: string | null; llm: boolean; provider?: string | null; chatModel?: string | null; voice: 'gemini' | 'browser' }>('/api/config'),
+  /** Gemini voice for a line of speech (WAV). Throws fast so the call can fall back. */
+  async tts(id: string, text: string, timeoutMs = 12000): Promise<ArrayBuffer> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const r = await fetch(`/api/session/${id}/tts`, { method: 'POST', signal: ctrl.signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.arrayBuffer();
+    } finally {
+      clearTimeout(timer);
+    }
+  },
   async resume(): Promise<Reply> {
     const id = safeGet(KEY);
     if (id) {

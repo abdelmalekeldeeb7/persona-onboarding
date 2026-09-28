@@ -15,6 +15,10 @@ type Handlers = {
   onReprompt?: (text: string, strike: number) => void; // locally generated nudge (silence)
 };
 
+type CallOptions = {
+  synthesize?: (text: string) => Promise<ArrayBuffer>;
+};
+
 const SR: any = typeof window !== 'undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 
 export const voiceSupport = () => ({
@@ -45,8 +49,11 @@ export class Call {
   private lastSpokeAt = 0;
   private voice: SpeechSynthesisVoice | null = null;
   private speakToken = 0;
+  private synthesize?: (text: string) => Promise<ArrayBuffer>;
+  private remoteAudio: HTMLAudioElement | null = null;
+  private remoteAudioUrl = '';
 
-  constructor(h: Handlers) { this.h = h; }
+  constructor(h: Handlers, options: CallOptions = {}) { this.h = h; this.synthesize = options.synthesize; }
 
   async start() {
     if (this.active) return;
@@ -67,23 +74,37 @@ export class Call {
   }
 
   /** Agent speaks. Resolves when finished or interrupted. */
-  speak(text: string): Promise<void> {
-    if (!this.active || !('speechSynthesis' in window)) return Promise.resolve();
+  async speak(text: string): Promise<void> {
+    if (!this.active) return;
     const token = ++this.speakToken;
-    speechSynthesis.cancel();
+    this.stopSpeech();
     this.clearSilence();
     this.speakingText = text;
     this.set('speaking');
+    if (this.synthesize) {
+      try {
+        const data = await this.synthesize(text);
+        if (token !== this.speakToken || !this.active) return;
+        await this.playGenerated(data, token);
+        if (token !== this.speakToken || !this.active) return;
+        this.spoken();
+        return;
+      } catch {
+        // Network, quota and model failures fall back to the browser voice.
+      }
+    }
+    if ('speechSynthesis' in window) await this.speakInBrowser(text, token);
+    else this.spoken();
+  }
+
+  private speakInBrowser(text: string, token: number): Promise<void> {
     const chunks = text.match(/[^.!?]+[.!?]*\s*/g) || [text]; // Chrome cuts off long utterances
     return new Promise((resolve) => {
       let i = 0;
       const next = () => {
         if (token !== this.speakToken || !this.active) return resolve();
         if (i >= chunks.length) {
-          this.lastSpokeAt = Date.now();
-          this.speakingText = '';
-          if (this.status === 'speaking') this.set('listening');
-          this.armSilence();
+          this.spoken();
           return resolve();
         }
         const u = new SpeechSynthesisUtterance(chunks[i++].trim());
@@ -97,12 +118,47 @@ export class Call {
     });
   }
 
+  private playGenerated(data: ArrayBuffer, token: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(new Blob([data], { type: 'audio/wav' }));
+      const audio = new Audio(url);
+      this.remoteAudio = audio;
+      this.remoteAudioUrl = url;
+      let settled = false;
+      const done = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        if (this.remoteAudio === audio) this.remoteAudio = null;
+        if (this.remoteAudioUrl === url) this.remoteAudioUrl = '';
+        URL.revokeObjectURL(url);
+        ok ? resolve() : reject(new Error('audio_playback_failed'));
+      };
+      audio.onended = () => done(true);
+      audio.onerror = () => done(false);
+      audio.play().catch(() => done(false));
+      if (token !== this.speakToken) { audio.pause(); done(true); }
+    });
+  }
+
+  private spoken() {
+    this.lastSpokeAt = Date.now();
+    this.speakingText = '';
+    if (this.status === 'speaking') this.set('listening');
+    this.armSilence();
+  }
+
+  private stopSpeech() {
+    try { speechSynthesis.cancel(); } catch {}
+    if (this.remoteAudio) { this.remoteAudio.pause(); this.remoteAudio = null; }
+    if (this.remoteAudioUrl) { URL.revokeObjectURL(this.remoteAudioUrl); this.remoteAudioUrl = ''; }
+  }
+
   thinking() { if (this.active && this.status !== 'speaking') this.set('thinking'); }
   listening() { if (this.active && this.status === 'thinking') { this.set('listening'); this.armSilence(); } }
 
   interrupt() {
     this.speakToken++;
-    try { speechSynthesis.cancel(); } catch {}
+    this.stopSpeech();
     this.speakingText = '';
     this.lastSpokeAt = Date.now();
     if (this.active) this.set('listening');
@@ -226,6 +282,7 @@ export class Call {
   }
 
   private pickVoice() {
+    if (!('speechSynthesis' in window)) return;
     const choose = () => {
       const vs = speechSynthesis.getVoices();
       const pref = [/Samantha/i, /Google US English/i, /Aria.*Natural/i, /Jenny.*Natural/i, /Natural/i, /Google.*English/i, /en-US/i];
@@ -248,7 +305,7 @@ export class Call {
     clearTimeout(this.endpointTimer);
     this.clearSilence();
     this.speakToken++;
-    try { speechSynthesis.cancel(); } catch {}
+    this.stopSpeech();
     try { this.rec?.abort(); } catch {}
     this.rec = null;
     cancelAnimationFrame(this.raf);
