@@ -6,15 +6,15 @@ import { Call, voiceSupport } from './lib/call';
 import { preloadGmail, connectGmail, simulatedGmail } from './lib/gmail';
 
 const ease=[.22,1,.36,1];
-const Mark=()=> <img src="/brand/mark.svg" alt=""/>;
+const Mark=()=> <img src="/design-v7/assets/mark.svg" alt=""/>;
 export default function App(){
  const [state,setState]=useState(null),[config,setConfig]=useState(null),[error,setError]=useState('');
  const [open,setOpen]=useState(false),[text,setText]=useState(''),[name,setName]=useState('');
  const [busy,setBusy]=useState(false),[gmailBusy,setGmailBusy]=useState(false),[sheet,setSheet]=useState(null);
  const [status,setStatus]=useState('idle'),[caption,setCaption]=useState(''),[muted,setMuted]=useState(false),[level,setLevel]=useState(0);
  const [view,setView]=useState('text'),[mediaReady,setMediaReady]=useState(false),[mediaFailed,setMediaFailed]=useState(false);
- const [pressing,setPressing]=useState(false),[soundOn,setSoundOn]=useState(true);
- const call=useRef(null),session=useRef(null),active=useRef(false),end=useRef(null),input=useRef(null),ring=useRef(null),panel=useRef(null),beam=useRef(null),world=useRef(null),video=useRef(null),pressTimer=useRef(null),serial=useRef(Promise.resolve());
+ const [pressing,setPressing]=useState(false),[closing,setClosing]=useState(false),[soundOn,setSoundOn]=useState(true);
+ const call=useRef(null),session=useRef(null),active=useRef(false),end=useRef(null),input=useRef(null),ring=useRef(null),panel=useRef(null),beam=useRef(null),world=useRef(null),video=useRef(null),reverseVideo=useRef(null),pressTimer=useRef(null),serial=useRef(Promise.resolve());
  const reduced=useReducedMotion(); session.current=state;
  const live=!['idle','ended'].includes(status);
  const agent=state?.agentName||'Your Persona';
@@ -51,7 +51,7 @@ export default function App(){
  const sfx=on=>{if(!soundOn)return;try{const AC=window.AudioContext||window.webkitAudioContext,ctx=new AC(),osc=ctx.createOscillator(),gain=ctx.createGain();osc.type='sine';osc.frequency.value=on?680:340;gain.gain.setValueAtTime(.045,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.09);osc.connect(gain).connect(ctx.destination);osc.start();osc.stop(ctx.currentTime+.09);setTimeout(()=>ctx.close(),180);}catch{}}
  const settleVideo=(time=4.6)=>{const v=video.current;if(!v)return;try{v.pause();v.currentTime=time;}catch{}}
  const awaken=()=>{
-  if(open||pressing)return;
+  if(open||pressing||closing)return;
   const v=video.current;
   if(reduced||mediaFailed||!v||!mediaReady){sfx(true);setOpen(true);return;}
   setPressing(true);clearTimeout(pressTimer.current);
@@ -61,21 +61,22 @@ export default function App(){
   try{v.pause();v.currentTime=4.6;v.playbackRate=1.6;const play=v.play();play?.then(()=>requestAnimationFrame(tick)).catch(reveal);}catch{reveal();}
   pressTimer.current=setTimeout(reveal,1250);
  };
- const minimize=()=>{if(!open)return;sfx(false);setOpen(false);setSheet(null);clearTimeout(pressTimer.current);setTimeout(()=>settleVideo(4.6),650);};
+ const minimize=()=>{if(!open||closing)return;const rv=reverseVideo.current;if(reduced||mediaFailed||!rv){sfx(false);setOpen(false);setSheet(null);setTimeout(()=>settleVideo(4.6),650);return;}setClosing(true);clearTimeout(pressTimer.current);let tucked=false;const tuck=()=>{if(tucked)return;tucked=true;sfx(false);setOpen(false);setSheet(null);};const finish=()=>{tuck();setClosing(false);settleVideo(4.6);try{rv.pause();rv.currentTime=0;}catch{}};try{rv.currentTime=0;rv.playbackRate=1.5;const play=rv.play();play?.catch(()=>finish());}catch{finish();return;}pressTimer.current=setTimeout(tuck,560);setTimeout(finish,1450);};
  const lastAgent=[...(state?.transcript||[])].reverse().find(m=>m.role==='agent');
  const incoming=!live&&['incoming_call','call_offer'].includes(lastAgent?.card?.type)&&!lastAgent?.card?.closed;
  const decline=async()=>{try{await event({type:'call_declined'});}catch{setError('Couldn’t save that. Please try again.');}};
  const submit=e=>{e.preventDefault();if(!text.trim()||busy)return;send(text);setText('');};
  const reset=async()=>{if(live)endCall();try{await event({type:'forget'});setName('');setSheet(null);setView('text');setText('');setOpen(false);setTimeout(()=>settleVideo(4.6),500);}catch{setError('Couldn’t reset. Your conversation is still here.');}};
- return <div className={`experience ${open?'projecting':''}`}>
+ return <div className={`experience ${open?'projecting':''} ${closing?'closing':''}`}>
   <header className="site-head"><a className="wordmark" href="/" aria-label="Persona home"><Mark/><span>Persona</span></a><span className="head-note">A little closer.</span><div className="head-actions"><button className="sound-toggle" onClick={()=>setSoundOn(v=>!v)} aria-label={soundOn?'Turn sound off':'Turn sound on'} aria-pressed={soundOn}>{soundOn?<Volume2 size={16}/>:<VolumeX size={16}/>}</button><button className="start-over" onClick={()=>{if(!open)setOpen(true);setSheet('reset');}}>Start over</button></div></header>
   <main className="world" ref={world}>
    <div className="world-title"><span className="overline">MEET YOUR PERSONA</span><h1>Your world.<br/>A little <em>lighter.</em></h1><p>One touch. A conversation that stays with you.</p></div>
-   <div className={`film-stage ${pressing?'pressing':''}`}>
-    <img className="band-surface poster" src="/band-poster.jpg" onLoad={()=>{if(!mediaReady)setMediaReady(true);}} onError={()=>{setMediaReady(true);setMediaFailed(true);}} alt="Persona Band on a wrist" draggable="false"/>
-    <video ref={video} className="band-surface film" src="/hero-1080.mp4" muted playsInline preload="auto" onLoadedMetadata={e=>{try{e.currentTarget.currentTime=4.6;}catch{}setMediaReady(true);}} onError={()=>{setMediaReady(true);setMediaFailed(true);}} aria-hidden="true"/>
+   <div className={`film-stage ${pressing?'pressing':''} ${closing?'reversing':''}`}>
+    <img className="band-surface poster" src="/design-v7/assets/band-poster.jpg" onLoad={()=>{if(!mediaReady)setMediaReady(true);}} onError={()=>{setMediaReady(true);setMediaFailed(true);}} alt="Persona Band on a wrist" draggable="false"/>
+    <video ref={video} className="band-surface film" src="/design-v7/assets/hero.mp4" muted playsInline preload="auto" onLoadedMetadata={e=>{try{e.currentTarget.currentTime=4.6;}catch{}setMediaReady(true);}} onError={()=>{setMediaReady(true);setMediaFailed(true);}} aria-hidden="true"/>
+    <video ref={reverseVideo} className="band-surface reverse-film" src="/design-v7/assets/hero-reverse.webm" muted playsInline preload="auto" aria-hidden="true"/>
     <button ref={ring} className={`ring-hit ${mediaReady?'ready':''} ${open?'active':''} ${live?'live':''}`} onClick={open?minimize:awaken} aria-label={open?'Minimize to the ring':'Touch the ring to meet your Persona'} aria-expanded={open} aria-controls="projection" style={{'--level':level}}><span className="ring-light"/><span className="ring-ripple"/></button>
-    {!open&&!pressing&&<div className="touch-label"><span className="touch-stem"/><button onClick={awaken}>{state?.transcript?.length?'Pick up where we left off':'Touch the ring'} <ArrowUpRight size={13}/></button><small>{mediaFailed?'You can still start here.':state?.transcript?.length?'Nothing’s lost.':'Your Persona is right here.'}</small></div>}
+    {!open&&!pressing&&!closing&&<div className="touch-label"><span className="touch-stem"/><button onClick={awaken}>{state?.transcript?.length?'Pick up where we left off':'Touch the ring'} <ArrowUpRight size={13}/></button><small>{mediaFailed?'You can still start here.':state?.transcript?.length?'Nothing’s lost.':'Your Persona is right here.'}</small></div>}
    </div>
    <AnimatePresence>{open&&<motion.div ref={beam} className="projection-beam" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} transition={{duration:reduced?0:.22,delay:reduced?0:.08}} aria-hidden="true"/>}</AnimatePresence>
    <AnimatePresence>{open&&<motion.section id="projection" ref={panel} className="projection glass" aria-label="Your Persona conversation" initial={reduced?{opacity:0}:{opacity:0,scale:.4,y:280,rotateX:-74}} animate={{opacity:1,scale:1,y:0,rotateX:3}} exit={{opacity:0,scale:.45,y:250,rotateX:-68}} transition={{duration:reduced?0:.56,delay:reduced?0:.2,ease}}>
