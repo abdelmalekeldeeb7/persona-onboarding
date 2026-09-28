@@ -31,6 +31,11 @@ export function speechChunks(text: string) {
   return out.length ? out : [text];
 }
 
+const UA = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+// All iOS browsers are WebKit; desktop Safari is the only other WebKit browser we see.
+const WEBKIT = /iPad|iPhone|iPod/.test(UA) || (/Macintosh/.test(UA) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1) ||
+  (/Safari\//.test(UA) && !/Chrome|Chromium|CriOS|FxiOS|Edg|OPR|Android/.test(UA));
+
 const SR: any = typeof window !== 'undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 
 export const voiceSupport = () => ({
@@ -70,6 +75,7 @@ export class Call {
   private holdOn = false;
   private restarts = 0;
   private recRunning = false;
+  private everStarted = false;
   private lastRecStart = 0;
   private watchdog: any = null;
   private onWake = () => this.resume();
@@ -98,16 +104,24 @@ export class Call {
     if (!SR) { this.finish('unsupported'); return; }
     this.active = true;
     this.set('connecting');
-    try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-    } catch {
-      this.finish('mic_denied');
-      return;
+    if (WEBKIT) {
+      // Safari (and every iPhone browser) only starts recognition inside the tap itself, and a
+      // second mic stream for the level meter fights recognition for the mic. So: start
+      // recognition right now, synchronously, and skip the meter. Mic denial arrives as onerror.
+      this.pickVoice();
+      this.listen();
+    } else {
+      try {
+        this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      } catch {
+        this.finish('mic_denied');
+        return;
+      }
+      if (!this.active) { this.stopStream(); return; }
+      this.meter();
+      this.pickVoice();
+      this.listen();
     }
-    if (!this.active) { this.stopStream(); return; }
-    this.meter();
-    this.pickVoice();
-    this.listen();
     // A Google sign-in popup, tab switch or recognizer hiccup can silently stop listening.
     // Keep checking, and restart as soon as the page has focus again.
     this.watchdog = setInterval(() => this.resume(), 2500);
@@ -263,9 +277,9 @@ export class Call {
   end(reason: EndReason = 'user') { this.finish(reason); }
 
   /** Restart listening if the recognizer died (popup focus loss, network blip). */
-  resume() {
+  resume(fromTap = false) {
     if (!this.active || this.muted || document.visibilityState === 'hidden') return;
-    if (!this.recRunning && Date.now() - this.lastRecStart > 2000) {
+    if (!this.recRunning && (fromTap || Date.now() - this.lastRecStart > 2000)) {
       try { this.rec?.abort(); } catch {}
       this.rec = null;
       this.listen();
@@ -340,11 +354,16 @@ export class Call {
       const wait = TRAILING.test(live) ? TRAILING_MS : this.finalBuf ? ENDPOINT_MS : INTERIM_ENDPOINT_MS;
       this.endpointTimer = setTimeout(() => this.flush(), wait);
     };
-    rec.onstart = () => { this.recRunning = true; this.restarts = 0; };
+    rec.onstart = () => { this.recRunning = true; this.everStarted = true; this.restarts = 0; };
     rec.onaudiostart = () => { this.recRunning = true; };
     rec.onerror = (e: any) => {
       if (e.error === 'service-not-allowed') this.finish('unsupported'); // Safari: Dictation/Siri is off
-      else if (e.error === 'not-allowed') this.finish('mic_denied');
+      else if (e.error === 'not-allowed') {
+        // iOS refuses restarts that aren't inside a tap. Once the mic was granted, that's not a
+        // denial: keep the call and let the next tap on the call screen restart listening.
+        if (WEBKIT && this.everStarted) this.recRunning = false;
+        else this.finish('mic_denied');
+      }
       else if (e.error === 'network' || e.error === 'audio-capture') { if (++this.restarts > 4) this.finish('error'); }
       // 'no-speech' and 'aborted' are routine; onend restarts us.
     };
