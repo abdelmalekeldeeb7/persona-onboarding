@@ -1,0 +1,52 @@
+[
+  {
+    "file": "openai.svg",
+    "source": "https://raw.githubusercontent.com/pheralb/svgl/main/static/library/openai.svg",
+    "license": "SVGL repository MIT; brand trademark rights remain with respective owners"
+  },
+  {
+    "file": "claude.svg",
+    "source": "https://raw.githubusercontent.com/pheralb/svgl/main/static/library/claude-ai-icon.svg",
+    "license": "SVGL repository MIT; brand trademark rights remain with respective owners"
+  },
+  {
+    "file": "gemini.svg",
+    "source": "https://raw.githubusercontent.com/pheralb/svgl/main/static/library/gemini.svg",
+    "license": "SVGL repository MIT; brand trademark rights remain with respective owners"
+  },
+  {
+    "file": "ollama.svg",
+    "source": "https://raw.githubusercontent.com/pheralb/svgl/main/static/library/ollama_light.svg",
+    "license": "SVGL repository MIT; brand trademark rights remain with respective owners"
+  },
+  {
+    "file": "gmail.svg",
+    "source": "https://raw.githubusercontent.com/pheralb/svgl/main/static/library/gmail.svg",
+    "license": "SVGL repository MIT; brand trademark rights remain with respective owners"
+  },
+  {
+    "file": "calendar.svg",
+    "source": "https://raw.githubusercontent.com/pheralb/svgl/main/static/library/google-calendar.svg",
+    "license": "SVGL repository MIT; brand trademark rights remain with respective owners"
+  },
+  {
+    "file": "notion.svg",
+    "source": "https://raw.githubusercontent.com/pheralb/svgl/main/static/library/notion.svg",
+    "license": "SVGL repository MIT; brand trademark rights remain with respective owners"
+  },
+  {
+    "file": "slack.svg",
+    "source": "https://raw.githubusercontent.com/pheralb/svgl/main/static/library/slack.svg",
+    "license": "SVGL repository MIT; brand trademark rights remain with respective owners"
+  },
+  {
+    "file": "drive.svg",
+    "source": "https://raw.githubusercontent.com/pheralb/svgl/main/static/library/drive.svg",
+    "license": "SVGL repository MIT; brand trademark rights remain with respective owners"
+  },
+  {
+    "file": "github.svg",
+    "source": "https://raw.githubusercontent.com/pheralb/svgl/main/static/library/github_light.svg",
+    "license": "SVGL repository MIT; brand trademark rights remain with respective owners"
+  }
+]
