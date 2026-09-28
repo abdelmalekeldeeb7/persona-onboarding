@@ -25,6 +25,7 @@ const TOOL = {
       gmail_intent: { type: 'string', enum: ['connect', 'skip'], description: 'Only if the user said they want to connect Gmail now, or declined it.' },
       mode_intent: { type: 'string', enum: ['call', 'text', 'end_call'], description: 'Only if the user asked to start a call, switch to typing, or end the call.' },
       asked_about_gmail: { type: 'boolean', description: 'True if your message offers to connect Gmail.' },
+      connector: { type: 'string', enum: ['notion', 'google_calendar', 'slack', 'google_drive'], description: 'Only when your message suggests adding one of these connectors because it clearly fits their need.' },
     },
     required: ['say'],
   },
@@ -34,7 +35,7 @@ export function llmRespond(system, messages, via = 'text') { return anthropicRes
 
 async function anthropicRespond(system, messages, via) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), Number(process.env.LLM_TIMEOUT_MS || 15000));
+  const timer = setTimeout(() => ctrl.abort(), Number(process.env.LLM_TIMEOUT_MS || (via === 'voice' ? 8000 : 15000)));
   try {
     const res = await fetch(`${BASE()}/v1/messages`, {
       method: 'POST',
@@ -66,7 +67,76 @@ async function anthropicRespond(system, messages, via) {
 // ---------- Gemini speech (the call's voice) ----------
 // The words still come from llmRespond; this only turns them into audio, so every
 // hangup/fact/turn rule on the server stays in charge.
-export const ttsEnabled = () => !!GEMINI_KEY() && process.env.GEMINI_TTS !== 'off';
+// A quota 429 trips a breaker so every later line doesn't wait on a doomed request and
+// calls stay in one consistent voice. Per-day quota: stay off for an hour; otherwise briefly.
+let ttsDownUntil = 0;
+const geminiReady = () => !!GEMINI_KEY() && process.env.GEMINI_TTS !== 'off' && Date.now() >= ttsDownUntil;
+// Kokoro (open weights, Apache-2.0) runs on this server: no key, no quota. It is the default
+// call voice so every line sounds the same. TTS_PROVIDER=gemini prefers Gemini when it has quota.
+const kokoroOn = () => process.env.TTS_PROVIDER !== 'gemini' && process.env.KOKORO !== 'off';
+export const ttsEnabled = () => (kokoroOn() && kokoroState !== 'failed') || geminiReady();
+
+let kokoro = null, kokoroState = 'idle', kokoroQueue = Promise.resolve();
+export function warmKokoro() {
+  if (!kokoroOn() || kokoro) return kokoro;
+  kokoroState = 'loading';
+  const t = Date.now();
+  kokoro = import('kokoro-js')
+    .then(({ KokoroTTS }) => KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', { dtype: 'q8', device: 'cpu' }))
+    .then((model) => {
+      kokoroState = 'ready';
+      console.log(`[tts] kokoro ready in ${Date.now() - t}ms`);
+      return model;
+    })
+    .catch((e) => { kokoroState = 'failed'; console.error('[tts] kokoro unavailable:', e.message); throw e; });
+  kokoro.catch(() => {});
+  return kokoro;
+}
+async function kokoroSpeak(text) {
+  const model = await warmKokoro();
+  // One CPU-bound render at a time, in request order, so a reply's sentences finish in sequence.
+  const job = kokoroQueue.then(async () => {
+    const audio = await model.generate(text, { voice: process.env.KOKORO_VOICE || 'af_heart', speed: 1.05 });
+    return Buffer.from(audio.toWav());
+  });
+  kokoroQueue = job.catch(() => {});
+  return job;
+}
+async function synthesize(text) {
+  if (process.env.TTS_PROVIDER === 'gemini' && geminiReady()) return geminiSpeak(text);
+  if (kokoroOn() && kokoroState !== 'failed') return kokoroSpeak(text);
+  return geminiSpeak(text);
+}
+
+// Voice turns prefetch their audio while the reply travels to the browser; the browser's
+// request then joins the in-flight render instead of starting from zero.
+const ttsCache = new Map();
+export function speakCached(text) {
+  const key = text.trim();
+  let p = ttsCache.get(key);
+  if (!p) {
+    p = synthesize(key);
+    ttsCache.set(key, p);
+    p.catch(() => ttsCache.delete(key));
+    setTimeout(() => ttsCache.delete(key), 5 * 60e3).unref?.();
+    if (ttsCache.size > 200) ttsCache.delete(ttsCache.keys().next().value);
+  }
+  return p;
+}
+export function prefetchSpeech(text) {
+  if (!ttsEnabled() || !text) return;
+  for (const line of speechChunks(text)) speakCached(line).catch(() => {});
+}
+// Must match the browser's chunking (src/lib/call.ts) so prefetched keys line up.
+export function speechChunks(text) {
+  const parts = (text.match(/[^.!?]+[.!?]+["'”’)]*\s*|[^.!?]+$/g) || [text]).map((x) => x.trim()).filter(Boolean);
+  const out = [];
+  for (const part of parts) {
+    if (out.length && part.length < 12) out[out.length - 1] += ' ' + part;
+    else out.push(part);
+  }
+  return out;
+}
 
 export async function geminiSpeak(text) {
   const ctrl = new AbortController();
@@ -90,7 +160,14 @@ export async function geminiSpeak(text) {
         },
       }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 300);
+      if (res.status === 429) {
+        ttsDownUntil = Date.now() + (/per day|daily/i.test(body) ? 60 * 60e3 : 60e3);
+        console.warn('[tts] quota hit; using browser voice until', new Date(ttsDownUntil).toISOString());
+      }
+      throw new Error(`HTTP ${res.status}: ${body}`);
+    }
     const data = await res.json();
     const audio = data.outputAudio || data.output_audio || data.steps
       ?.flatMap((step) => step.content || [])

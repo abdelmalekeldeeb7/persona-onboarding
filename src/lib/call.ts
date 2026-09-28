@@ -20,6 +20,17 @@ type CallOptions = {
   synthesize?: (text: string, signal?: AbortSignal) => Promise<ArrayBuffer>;
 };
 
+// Must match speechChunks in server/llm.mjs so prefetched audio is reused.
+export function speechChunks(text: string) {
+  const parts = (text.match(/[^.!?]+[.!?]+["'”’)]*\s*|[^.!?]+$/g) || [text]).map((x) => x.trim()).filter(Boolean);
+  const out: string[] = [];
+  for (const part of parts) {
+    if (out.length && part.length < 12) out[out.length - 1] += ' ' + part;
+    else out.push(part);
+  }
+  return out.length ? out : [text];
+}
+
 const SR: any = typeof window !== 'undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 
 export const voiceSupport = () => ({
@@ -32,6 +43,9 @@ export const voiceSupport = () => ({
 const ENDPOINT_MS = 1100;
 const INTERIM_ENDPOINT_MS = 1500;
 const BARGE_CONFIRM_MS = 450;
+// People trail off ("because…", "uh…") mid-thought; wait longer before treating that as the end.
+const TRAILING_MS = 2600;
+const TRAILING = /(?:^|\s)(?:u+h+|u+m+|e+r+m*|hmm+|and|but|so|because|cause|or|the|a|an|to|of|with|like|that|which|if|when|my|i|i'm|is|are|was|for|about|just|um,|uh,)[\s,.…-]*$/i;
 const BACKCHANNEL = /^(m+hm+|mm+|uh[- ]?huh|yeah|yep|yes|right|okay|ok|sure|got it|i see)[.!?, ]*$/i;
 const HOLD_ON = /^(please )?(hold on|one sec(?:ond)?|give me a moment|wait a sec(?:ond)?)[.! ]*$/i;
 
@@ -44,6 +58,10 @@ export class Call {
   private active = false;
   private finalBuf = '';
   private interim = '';
+  // Chrome keeps growing one result while a sentence continues. Once a partial
+  // result is sent, remember it so later versions only contribute new words.
+  private sentByIndex = new Map<number, string>();
+  private interimByIndex = new Map<number, string>();
   private endpointTimer: any = null;
   private bargeTimer: any = null;
   private bargeCandidate = '';
@@ -51,6 +69,10 @@ export class Call {
   private silenceStrikes = 0;
   private holdOn = false;
   private restarts = 0;
+  private recRunning = false;
+  private lastRecStart = 0;
+  private watchdog: any = null;
+  private onWake = () => this.resume();
   private stream: MediaStream | null = null;
   private audioCtx: AudioContext | null = null;
   private raf = 0;
@@ -80,6 +102,11 @@ export class Call {
     this.meter();
     this.pickVoice();
     this.listen();
+    // A Google sign-in popup, tab switch or recognizer hiccup can silently stop listening.
+    // Keep checking, and restart as soon as the page has focus again.
+    this.watchdog = setInterval(() => this.resume(), 2500);
+    addEventListener('focus', this.onWake);
+    document.addEventListener('visibilitychange', this.onWake);
     this.set('thinking'); // waiting for the agent's greeting
   }
 
@@ -93,38 +120,48 @@ export class Call {
     this.heardText = '';
     this.set('speaking');
     if (this.synthesize) {
+      // Sentences render in parallel so the first one can start while later ones finish.
+      const chunks = speechChunks(text);
       const controller = new AbortController();
+      const renders = chunks.map((line) => this.synthesize!(line, controller.signal)
+        .then((data) => ({ kind: 'audio' as const, data }))
+        .catch(() => ({ kind: 'failed' as const })));
+      const wait = <T,>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<{ kind: 'slow' }>((r) => setTimeout(() => r({ kind: 'slow' }), ms))]);
       try {
-        const generated = this.synthesize(text, controller.signal)
-          .then((data) => ({ kind: 'audio' as const, data }))
-          .catch((error) => ({ kind: 'failed' as const, error }));
-        // Do not leave a live conversation silent while cloud speech is rendered.
-        const result = await Promise.race([
-          generated,
-          new Promise<{ kind: 'slow' }>((resolve) => setTimeout(() => resolve({ kind: 'slow' }), 850)),
-        ]);
-        if (token !== this.speakToken || !this.active) { controller.abort(); return; }
-        if (result.kind === 'audio') {
-          await this.playGenerated(result.data, token);
+        let spokenSoFar: string[] = [];
+        for (let i = 0; i < chunks.length; i++) {
+          const result = await wait(renders[i], i === 0 ? 4500 : 8000);
+          if (token !== this.speakToken || !this.active) { controller.abort(); return; }
+          if (result.kind !== 'audio') {
+            controller.abort();
+            // One voice per call: after a real failure, stay on the browser voice.
+            if (result.kind === 'failed') this.synthesize = undefined;
+            const rest = chunks.slice(i).join(' ');
+            if ('speechSynthesis' in window) await this.speakInBrowser(rest, token, spokenSoFar.join(' '));
+            else this.spoken();
+            return;
+          }
+          await this.playGenerated(result.data, token, chunks[i], spokenSoFar.join(' '));
           if (token !== this.speakToken || !this.active) return;
-          this.spoken();
-          return;
+          spokenSoFar.push(chunks[i]);
         }
-        // A slow request is canceled so its late audio cannot interrupt the fallback.
-        controller.abort();
+        this.spoken();
+        return;
       } catch {
-        // Network, quota and model failures fall back to the browser voice.
+        controller.abort();
+        this.synthesize = undefined;
+        // Playback failed; the browser voice reads the whole line.
       }
     }
     if ('speechSynthesis' in window) await this.speakInBrowser(text, token);
     else this.spoken();
   }
 
-  private speakInBrowser(text: string, token: number): Promise<void> {
+  private speakInBrowser(text: string, token: number, already = ''): Promise<void> {
     const chunks = text.match(/[^.!?]+[.!?]*\s*/g) || [text]; // Chrome cuts off long utterances
     return new Promise((resolve) => {
       let i = 0;
-      const heardChunks: string[] = [];
+      const heardChunks: string[] = already ? [already] : [];
       const next = () => {
         if (token !== this.speakToken || !this.active) return resolve();
         if (i >= chunks.length) {
@@ -151,7 +188,7 @@ export class Call {
     });
   }
 
-  private playGenerated(data: ArrayBuffer, token: number): Promise<void> {
+  private playGenerated(data: ArrayBuffer, token: number, line: string, already: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(new Blob([data], { type: 'audio/wav' }));
       const audio = new Audio(url);
@@ -170,8 +207,8 @@ export class Call {
       audio.onerror = () => done(false);
       audio.ontimeupdate = () => {
         if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
-        const chars = Math.floor(this.speakingText.length * Math.min(1, audio.currentTime / audio.duration));
-        this.heardText = this.speakingText.slice(0, chars).replace(/\s+\S*$/, '').trim();
+        const chars = Math.floor(line.length * Math.min(1, audio.currentTime / audio.duration));
+        this.heardText = [already, line.slice(0, chars).replace(/\s+\S*$/, '').trim()].filter(Boolean).join(' ');
       };
       audio.play().catch(() => done(false));
       if (token !== this.speakToken) { audio.pause(); done(true); }
@@ -213,6 +250,17 @@ export class Call {
 
   end(reason: EndReason = 'user') { this.finish(reason); }
 
+  /** Restart listening if the recognizer died (popup focus loss, network blip). */
+  resume() {
+    if (!this.active || this.muted || document.visibilityState === 'hidden') return;
+    if (!this.recRunning && Date.now() - this.lastRecStart > 2000) {
+      try { this.rec?.abort(); } catch {}
+      this.rec = null;
+      this.listen();
+    }
+    if (this.status === 'thinking' && !this.speakingText && Date.now() - this.lastSpokeAt > 15000) this.set('listening');
+  }
+
   // ---- internals ----
 
   private listen() {
@@ -220,15 +268,23 @@ export class Call {
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = navigator.language || 'en-US';
+    this.sentByIndex.clear();
+    this.interimByIndex.clear();
     rec.onresult = (e: any) => {
       if (this.muted) return;
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
-        const txt = r[0].transcript;
+        const full = r[0].transcript;
+        const txt = this.unsent(i, full);
         if (r.isFinal) {
-          if (!this.isEcho(txt)) this.finalBuf += ' ' + txt;
-        } else interim += txt;
+          this.sentByIndex.delete(i);
+          this.interimByIndex.delete(i);
+          if (txt.trim() && !this.isEcho(txt)) this.finalBuf += ' ' + txt;
+        } else {
+          this.interimByIndex.set(i, full);
+          interim += ' ' + txt;
+        }
       }
       this.interim = this.isEcho(interim) ? '' : interim;
       const live = (this.finalBuf + ' ' + this.interim).trim();
@@ -268,23 +324,41 @@ export class Call {
         }
       }
       clearTimeout(this.endpointTimer);
-      this.endpointTimer = setTimeout(() => this.flush(), this.finalBuf ? ENDPOINT_MS : INTERIM_ENDPOINT_MS);
+      const wait = TRAILING.test(live) ? TRAILING_MS : this.finalBuf ? ENDPOINT_MS : INTERIM_ENDPOINT_MS;
+      this.endpointTimer = setTimeout(() => this.flush(), wait);
     };
+    rec.onstart = () => { this.recRunning = true; this.restarts = 0; };
     rec.onerror = (e: any) => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') this.finish('mic_denied');
       else if (e.error === 'network' || e.error === 'audio-capture') { if (++this.restarts > 4) this.finish('error'); }
       // 'no-speech' and 'aborted' are routine; onend restarts us.
     };
     rec.onend = () => {
+      if (this.rec === rec) this.recRunning = false;
       if (!this.active) return;
       setTimeout(() => { if (this.active && this.rec === rec) try { rec.start(); } catch { this.rec = null; this.listen(); } }, 150);
     };
     this.rec = rec;
+    this.lastRecStart = Date.now();
     try { rec.start(); } catch {}
+  }
+
+  // Words of a recognizer result that have not already been sent.
+  private unsent(i: number, full: string) {
+    const prev = this.sentByIndex.get(i);
+    if (!prev) return full;
+    const words = (x: string) => x.toLowerCase().match(/[a-z0-9']+/g) || [];
+    const sent = words(prev), now = words(full);
+    const same = sent.filter((w, k) => now[k] === w).length;
+    if (!sent.length || same / sent.length < 0.6) return full;
+    // Drop as many leading raw words as were already sent.
+    return full.trim().split(/\s+/).slice(sent.length).join(' ');
   }
 
   private flush() {
     const text = (this.finalBuf + ' ' + this.interim).replace(/\s+/g, ' ').trim();
+    for (const [i, t] of this.interimByIndex) this.sentByIndex.set(i, t);
+    this.interimByIndex.clear();
     this.finalBuf = '';
     this.interim = '';
     this.h.onCaption?.('');
@@ -385,6 +459,9 @@ export class Call {
     const partial = (this.finalBuf + ' ' + this.interim).replace(/\s+/g, ' ').trim();
     const midSpeech = !!partial;
     this.active = false;
+    clearInterval(this.watchdog);
+    removeEventListener('focus', this.onWake);
+    document.removeEventListener('visibilitychange', this.onWake);
     clearTimeout(this.endpointTimer);
     clearTimeout(this.bargeTimer);
     this.clearSilence();

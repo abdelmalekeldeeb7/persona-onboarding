@@ -83,7 +83,7 @@ export const api = {
     safeSet(KEY, r.state.id);
     return { state: r.state, messages: [] };
   },
-  turn: (id: string, text: string, via: 'voice' | 'text') => req<Reply>(`/api/session/${id}/turn`, { text, via }, 1),
+  turn: (id: string, text: string, via: 'voice' | 'text') => req<Reply>(`/api/session/${id}/turn`, { text, via, nonce: Math.random().toString(36).slice(2) + Date.now().toString(36) }, 1),
   event: (id: string, ev: Record<string, unknown>) => req<Reply>(`/api/session/${id}/event`, ev),
   beacon(id: string, ev: Record<string, unknown>) {
     try {

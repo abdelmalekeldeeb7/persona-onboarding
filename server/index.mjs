@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { initStore, getSession, saveSession } from './store.mjs';
 import { newSession, handleTurn, handleEvent, publicState } from './engine.mjs';
-import { llmEnabled, llmProvider, ttsEnabled, geminiSpeak } from './llm.mjs';
+import { llmEnabled, llmProvider, ttsEnabled, speakCached, prefetchSpeech, warmKokoro } from './llm.mjs';
 
 const app = express();
 app.set('trust proxy', 1); // Railway terminates TLS at its proxy
@@ -145,7 +145,15 @@ app.post('/api/session/:id/turn', async (req, res) => {
       const s = await getSession(id);
       if (!s || !owns(req, s)) return null;
       const via = req.body?.via === 'voice' ? 'voice' : 'text';
+      // A retried request (response lost on a flaky network) must not run the turn twice.
+      const nonce = typeof req.body?.nonce === 'string' ? req.body.nonce.slice(0, 40) : null;
+      if (nonce) {
+        s.nonces ||= [];
+        if (s.nonces.includes(nonce)) return { state: publicState(s), messages: s.transcript.slice(-1).filter((m) => m.role === 'agent') };
+        s.nonces = [...s.nonces.slice(-19), nonce];
+      }
       const messages = await handleTurn(s, { text: req.body?.text, via });
+      if (via === 'voice' || s.call.active) for (const m of messages) if (m.role === 'agent') prefetchSpeech(m.text);
       await saveSession(s);
       return { state: publicState(s), messages };
     });
@@ -164,9 +172,9 @@ app.post('/api/session/:id/tts', async (req, res) => {
   const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
   if (!ttsEnabled()) return res.status(404).json({ error: 'unavailable' });
   if (!text || text.length > 600) return res.status(400).json({ error: 'bad text' });
-  if (limited(res, `tts:${s.id}`, 30)) return;
+  if (limited(res, `tts:${s.id}`, 90)) return;
   try {
-    const audio = await geminiSpeak(text);
+    const audio = await speakCached(text);
     res.set({ 'content-type': 'audio/wav', 'cache-control': 'no-store' }).send(audio);
   } catch (e) {
     console.error('[tts] failed:', e.message);
@@ -185,6 +193,7 @@ app.post('/api/session/:id/event', async (req, res) => {
       const s = await getSession(id);
       if (!s || !owns(req, s)) return null;
       const messages = await handleEvent(s, body || {});
+      if (s.call.active) for (const m of messages) if (m.role === 'agent') prefetchSpeech(m.text);
       await saveSession(s);
       return { state: publicState(s), messages };
     });
@@ -206,4 +215,5 @@ if (fs.existsSync(dist)) {
 
 const port = Number(process.env.PORT || 8790);
 await initStore();
+warmKokoro(); // load the voice model at boot, not on the first call
 app.listen(port, () => console.log(`[persona] http://localhost:${port}  llm=${llmProvider() || "fallback"}`));

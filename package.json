@@ -10,10 +10,11 @@
     "test:engine": "node --test server/engine.test.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "dependencies": {
     "express": "^5.2.1",
+    "kokoro-js": "^1.2.1",
     "lucide-react": "^1.48.0",
     "motion": "^13.4.4",
     "pg": "^8.23.0",
