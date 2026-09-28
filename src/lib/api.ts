@@ -40,8 +40,7 @@ async function req<T>(path: string, body?: unknown, retries = 2): Promise<T> {
         headers: body === undefined ? undefined : { 'content-type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
-      if (r.status === 404) throw Object.assign(new Error('not found'), { status: 404 });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
       return (await r.json()) as T;
     } catch (e: any) {
       if (e.status === 404 || i >= retries) throw e;
@@ -59,7 +58,7 @@ export const api = {
         const r = await req<Reply>(`/api/session/${id}`);
         return { state: r.state, messages: r.messages ?? [] };
       } catch (e: any) {
-        if (e.status !== 404) throw e;
+        if (e.status !== 400 && e.status !== 404) throw e;
       }
     }
     return api.fresh();
