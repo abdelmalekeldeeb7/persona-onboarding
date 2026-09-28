@@ -21,3 +21,23 @@
 @media(max-height:680px) and (min-width:651px){.exact-hud{display:none}.exact-naming,.exact-incoming,.exact-voice{padding-top:4px}.exact-naming form{margin-top:16px}.exact-panel-head{height:62px;min-height:62px}.exact-title h1{margin:12px 0;font-size:40px!important}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.exact-beam{display:none}}
 @supports not (backdrop-filter:blur(1px)){.exact-glass{background:#f7f8fb}.exact-sheet{background:#f7f8fb}}
+
+/* The hardware remains the visual anchor while the interface materializes from it. */
+.exact-vignette{transition:opacity .7s cubic-bezier(.16,1,.3,1) .04s}
+.exact-beam{background:linear-gradient(to top,#8cebb400 0%,#a8edc166 13%,#d3f5df4d 45%,#ffffff80 100%);transform-origin:50% 100%;transition:opacity .45s ease .12s}
+.exact-beam.halo{filter:blur(22px)}
+.exact-frame.projecting .exact-beam{animation:beam-focus .86s cubic-bezier(.16,1,.3,1) both}
+.exact-frame.projecting .exact-beam.halo{animation:beam-bloom 1.15s cubic-bezier(.16,1,.3,1) both}
+.exact-glass{overflow:hidden}
+.exact-glass:after{content:"";position:absolute;inset:-40% -70%;background:linear-gradient(105deg,transparent 40%,#ffffffb8 49%,#dff9e766 53%,transparent 61%);transform:translateX(-38%) rotate(4deg);opacity:0}
+.exact-frame.projecting .exact-glass{animation:glass-materialize .8s cubic-bezier(.16,1,.3,1) .16s both}
+.exact-frame.projecting .exact-glass:after{animation:glass-sheen 1.05s cubic-bezier(.16,1,.3,1) .32s both}
+.exact-frame.projecting .exact-panel-head{animation:panel-content-in .55s cubic-bezier(.16,1,.3,1) .44s both}
+.exact-frame.projecting .exact-conversation,.exact-frame.projecting .exact-naming,.exact-frame.projecting .exact-voice{animation:panel-content-in .62s cubic-bezier(.16,1,.3,1) .5s both}
+.exact-frame.projecting .exact-panel-foot{animation:panel-content-in .5s cubic-bezier(.16,1,.3,1) .62s both}
+@keyframes beam-focus{0%{filter:blur(18px);transform:scaleX(.08) scaleY(.2);opacity:0}45%{opacity:.88}100%{filter:blur(0);transform:none;opacity:1}}
+@keyframes beam-bloom{0%{filter:blur(35px);transform:scaleX(.05) scaleY(.1);opacity:0}55%{opacity:.8}100%{filter:blur(22px);transform:none;opacity:.7}}
+@keyframes glass-materialize{0%{opacity:0;filter:blur(18px);transform:scale(.94,.72)}100%{opacity:1;filter:none;transform:none}}
+@keyframes glass-sheen{0%{opacity:0;transform:translateX(-38%) rotate(4deg)}30%{opacity:.9}100%{opacity:0;transform:translateX(38%) rotate(4deg)}}
+@keyframes panel-content-in{from{opacity:0;transform:translateY(10px);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
+@media(prefers-reduced-motion:reduce){.exact-frame.projecting .exact-beam,.exact-frame.projecting .exact-beam.halo,.exact-frame.projecting .exact-glass,.exact-frame.projecting .exact-glass:after,.exact-frame.projecting .exact-panel-head,.exact-frame.projecting .exact-conversation,.exact-frame.projecting .exact-naming,.exact-frame.projecting .exact-voice,.exact-frame.projecting .exact-panel-foot{animation:none!important}}

@@ -84,7 +84,7 @@ export async function geminiSpeak(text) {
           text,
           annotations: [{ type: 'speech_metadata', style: 'warm, calm and conversational; natural phone-call pacing' }],
         }] }],
-        response_format: { type: 'audio', mime_type: 'audio/wav', delivery: 'inline' },
+        response_format: { type: 'audio', mime_type: 'audio/wav' },
         generation_config: {
           speech_config: [{ voice: process.env.GEMINI_TTS_VOICE || 'Kore' }],
         },
