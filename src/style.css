@@ -54,11 +54,3 @@
 .exact-voice .exact-suggestions{margin-top:10px}
 .exact-voice .exact-gmail-nudge{max-width:340px}
 
-/* Phones: the film scrub, 3D unfold and live blurs stutter on mobile GPUs. Keep a quick fade instead. */
-@media (pointer:coarse),(max-width:650px){
-.exact-panel{filter:none!important;transform:none!important;transition:opacity .22s ease,visibility 0s!important}
-.exact-glass{-webkit-backdrop-filter:blur(12px) saturate(1.2)!important;backdrop-filter:blur(12px) saturate(1.2)!important}
-.exact-stage{transition:none!important}
-.exact-beam,.exact-vignette{transition:opacity .2s ease!important}
-.exact-voice,.exact-memory-card,.exact-message{animation:none!important}
-}
