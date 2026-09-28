@@ -14,6 +14,7 @@ type Handlers = {
   onEnd?: (reason: EndReason, info: { midSpeech: boolean; partial: string }) => void;
   onReprompt?: (text: string, strike: number) => void; // locally generated nudge (silence)
   onSilenceText?: (strike: number) => string;
+  onDiag?: (detail: string) => void; // voice lifecycle notes for server logs
 };
 
 type CallOptions = {
@@ -354,9 +355,10 @@ export class Call {
       const wait = TRAILING.test(live) ? TRAILING_MS : this.finalBuf ? ENDPOINT_MS : INTERIM_ENDPOINT_MS;
       this.endpointTimer = setTimeout(() => this.flush(), wait);
     };
-    rec.onstart = () => { this.recRunning = true; this.everStarted = true; this.restarts = 0; };
+    rec.onstart = () => { if (!this.everStarted) this.h.onDiag?.('rec_start'); this.recRunning = true; this.everStarted = true; this.restarts = 0; };
     rec.onaudiostart = () => { this.recRunning = true; };
     rec.onerror = (e: any) => {
+      this.h.onDiag?.(`rec_error:${e.error}:running=${this.recRunning}:ever=${this.everStarted}`);
       if (e.error === 'service-not-allowed') this.finish('unsupported'); // Safari: Dictation/Siri is off
       else if (e.error === 'not-allowed') {
         // iOS refuses restarts that aren't inside a tap. Once the mic was granted, that's not a
@@ -374,7 +376,7 @@ export class Call {
     };
     this.rec = rec;
     this.lastRecStart = Date.now();
-    try { rec.start(); } catch {}
+    try { rec.start(); } catch (err: any) { this.h.onDiag?.(`rec_start_threw:${err?.name || err}`); }
   }
 
   // Words of a recognizer result that have not already been sent.

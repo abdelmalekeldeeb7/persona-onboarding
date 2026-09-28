@@ -187,6 +187,12 @@ app.post('/api/session/:id/event', async (req, res) => {
   if (!ID_RE.test(id)) return res.status(400).json({ error: 'bad id' });
   let body = req.body;
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
+  // Voice diagnostics: which browser, which call step, which recognizer error. No message content.
+  if (/^(call_|voice_diag|client_caps)/.test(String(body?.type || ''))) {
+    const ua = String(req.get('user-agent') || '').replace(/^Mozilla\/5\.0 /, '').slice(0, 110);
+    console.log(`[voice] ${id.slice(0, 8)} ${body.type}${body.reason ? ' reason=' + body.reason : ''}${body.detail ? ' ' + String(body.detail).slice(0, 80) : ''}${body.voice !== undefined ? ' voice=' + body.voice : ''} | ${ua}`);
+    if (body.type === 'voice_diag') return res.json({ ok: true });
+  }
   if (limited(res, `event:${id}`, 60)) return;
   try {
     const out = await withLock(id, async () => {
