@@ -517,7 +517,7 @@ function fallbackRespond(s, { goal, userText, notes }) {
 
   if (!s.agentName && t) {
     const m = t.match(/\b(?:call you|name you|name is|named|call it|be)\s+([a-z][a-z'\-]+)/i);
-    if (/\b(you pick|surprise me|don'?t know|idk|whatever|anything)\b/.test(low)) r.agent_name = PICK[Math.floor(Math.random() * PICK.length)];
+    if (/\b(you pick|surprise me|don'?t know|idk|whatever|anything)\b/.test(low)) r.agent_name = PICK;
     else if (m) r.agent_name = m[1];
     else if (short && !/[?]|\b(what|who|why|how|hmm+|um+|uh+|huh|idk|no|yes|hi|hello|hey)\b/i.test(t)) r.agent_name = t;
   } else if (t && !acting) {
