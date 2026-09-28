@@ -545,7 +545,7 @@ function fallbackRespond(s, { goal, userText, notes }) {
   else if (g === 'ask_user_name') parts.push('What should I call you?');
   else if (g === 'ask_need') parts.push('What’s one thing on your plate right now that I could help with?');
   else if (g === 'offer_gmail') {
-    if (r.need) parts.push(`“${r.need}”: that’s very fixable.`);
+    if (r.need) parts.push(`“${String(r.need).replace(/[.!?]+$/, '')}” — that’s very fixable.`);
     parts.push(emailRelated(need) || emailRelated(t)
       ? 'If you connect Gmail (read-only), I can see who’s actually waiting on you. Or skip it and we’ll work from what you tell me.'
       : 'If you connect Gmail (read-only), I can pull the relevant threads instead of you describing them. Or skip it for now.');

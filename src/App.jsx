@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { ArrowUp, ArrowUpRight, ArrowRight, X, Minus, Phone, PhoneOff, Mic, MicOff, Keyboard, Mail, Check, RotateCcw, Volume2, Lock, ChevronLeft } from 'lucide-react';
+import { ArrowUp, ArrowUpRight, ArrowRight, X, Minus, Phone, PhoneOff, Mic, MicOff, Keyboard, Check, RotateCcw, Volume2, VolumeX, Lock, ChevronLeft } from 'lucide-react';
 import { api } from './lib/api';
 import { Call, voiceSupport } from './lib/call';
 import { preloadGmail, connectGmail, simulatedGmail } from './lib/gmail';
@@ -13,20 +13,21 @@ export default function App(){
  const [busy,setBusy]=useState(false),[gmailBusy,setGmailBusy]=useState(false),[sheet,setSheet]=useState(null);
  const [status,setStatus]=useState('idle'),[caption,setCaption]=useState(''),[muted,setMuted]=useState(false),[level,setLevel]=useState(0);
  const [view,setView]=useState('text'),[mediaReady,setMediaReady]=useState(false),[mediaFailed,setMediaFailed]=useState(false);
- const call=useRef(null),session=useRef(null),active=useRef(false),end=useRef(null),input=useRef(null),ring=useRef(null),panel=useRef(null),beam=useRef(null),world=useRef(null),serial=useRef(Promise.resolve());
+ const [pressing,setPressing]=useState(false),[soundOn,setSoundOn]=useState(true);
+ const call=useRef(null),session=useRef(null),active=useRef(false),end=useRef(null),input=useRef(null),ring=useRef(null),panel=useRef(null),beam=useRef(null),world=useRef(null),video=useRef(null),pressTimer=useRef(null),serial=useRef(Promise.resolve());
  const reduced=useReducedMotion(); session.current=state;
  const live=!['idle','ended'].includes(status);
  const agent=state?.agentName||'Your Persona';
  const apply=r=>{setState(r.state);session.current=r.state;return r;};
  useEffect(()=>{let alive=true;(async()=>{try{const [r,c]=await Promise.all([api.resume(),api.config()]);if(!alive)return;apply(r);setConfig(c);preloadGmail(c.googleClientId);const v=voiceSupport();await api.event(r.state.id,{type:'client_caps',voice:v.recognition&&v.synthesis});}catch{if(alive)setError('We couldn’t connect. Refresh to try again.');}})();return()=>{alive=false;};},[]);
  useEffect(()=>{const h=()=>{if(active.current&&session.current)api.beacon(session.current.id,{type:'call_ended',reason:'tab_closed'});};window.addEventListener('pagehide',h);return()=>window.removeEventListener('pagehide',h);},[]);
- useEffect(()=>{end.current?.scrollIntoView({behavior:reduced?'instant':'smooth',block:'nearest'});},[state?.transcript.length,busy,open,view]);
+ useEffect(()=>{const box=end.current?.parentElement;if(box)box.scrollTo({top:box.scrollHeight,behavior:reduced?'instant':'smooth'});if(panel.current)panel.current.scrollTop=0;},[state?.transcript.length,busy,open,view,reduced]);
  useEffect(()=>{if(!open)return;const timer=setTimeout(()=>(panel.current?.querySelector('input,textarea')||panel.current?.querySelector('button'))?.focus({preventScroll:true}),380);const key=e=>{if(e.key==='Escape'){if(sheet)setSheet(null);else{setOpen(false);ring.current?.focus();}}};window.addEventListener('keydown',key);return()=>{clearTimeout(timer);window.removeEventListener('keydown',key);};},[open,sheet]);
- useEffect(()=>()=>{active.current=false;call.current?.end('user');},[]);
+ useEffect(()=>()=>{active.current=false;call.current?.end('user');clearTimeout(pressTimer.current);},[]);
  // Keep the projection attached to the actual ring while the film and glass move.
  useEffect(()=>{if(!open)return;let frame;let until=performance.now()+750;
-  const update=()=>{const r=ring.current?.getBoundingClientRect(),p=panel.current?.getBoundingClientRect(),w=world.current?.getBoundingClientRect();
-   if(r&&p&&w&&beam.current){const x=r.left+r.width/2-w.left,y=r.top+r.height/2-w.top;beam.current.style.clipPath=`polygon(${x}px ${y}px,${p.left-w.left+5}px ${p.top-w.top+35}px,${p.left-w.left+5}px ${p.bottom-w.top-35}px)`;}
+   const update=()=>{const r=ring.current?.getBoundingClientRect(),p=panel.current?.getBoundingClientRect(),w=world.current?.getBoundingClientRect();
+   if(r&&p&&w&&beam.current){const x=r.left+r.width/2-w.left,y=r.top+r.height/2-w.top,half=Math.max(12,r.width*.34),bottom=p.bottom-w.top-1;beam.current.style.clipPath=`polygon(${x-half}px ${y-5}px,${x+half}px ${y-5}px,${p.right-w.left-18}px ${bottom}px,${p.left-w.left+18}px ${bottom}px)`;}
    if(performance.now()<until)frame=requestAnimationFrame(update);
   }; const resized=()=>{cancelAnimationFrame(frame);until=performance.now()+750;update();};update();window.addEventListener('resize',resized);return()=>{cancelAnimationFrame(frame);window.removeEventListener('resize',resized);};
  },[open]);
@@ -47,26 +48,38 @@ export default function App(){
  };
  const endCall=()=>call.current?.end('user');
  const gmail=async(sample=false)=>{if(gmailBusy)return;setGmailBusy(true);setError('');try{const result=sample?simulatedGmail():await connectGmail(config.googleClientId);await speak(await event({type:'gmail_connected',...result}));setSheet(null);}catch(e){setError('Gmail didn’t connect. You can retry or keep going.');await event({type:'gmail_failed',error:e.message}).catch(()=>{});}finally{setGmailBusy(false);}};
- // The filmed touch gesture used to replay after the user's click, causing a second,
- // delayed activation. Use its calibrated still as the camera surface instead.
- const awaken=()=>setOpen(true);
+ const sfx=on=>{if(!soundOn)return;try{const AC=window.AudioContext||window.webkitAudioContext,ctx=new AC(),osc=ctx.createOscillator(),gain=ctx.createGain();osc.type='sine';osc.frequency.value=on?680:340;gain.gain.setValueAtTime(.045,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.09);osc.connect(gain).connect(ctx.destination);osc.start();osc.stop(ctx.currentTime+.09);setTimeout(()=>ctx.close(),180);}catch{}}
+ const settleVideo=(time=4.6)=>{const v=video.current;if(!v)return;try{v.pause();v.currentTime=time;}catch{}}
+ const awaken=()=>{
+  if(open||pressing)return;
+  const v=video.current;
+  if(reduced||mediaFailed||!v||!mediaReady){sfx(true);setOpen(true);return;}
+  setPressing(true);clearTimeout(pressTimer.current);
+  let opened=false;
+  const reveal=()=>{if(opened)return;opened=true;sfx(true);setPressing(false);setOpen(true);};
+  const tick=()=>{if(v.currentTime>=6.12)reveal();if(v.currentTime>=8.2){v.pause();v.currentTime=12;return;}if(!v.paused)requestAnimationFrame(tick);};
+  try{v.pause();v.currentTime=4.6;v.playbackRate=1.6;const play=v.play();play?.then(()=>requestAnimationFrame(tick)).catch(reveal);}catch{reveal();}
+  pressTimer.current=setTimeout(reveal,1250);
+ };
+ const minimize=()=>{if(!open)return;sfx(false);setOpen(false);setSheet(null);clearTimeout(pressTimer.current);setTimeout(()=>settleVideo(4.6),650);};
  const lastAgent=[...(state?.transcript||[])].reverse().find(m=>m.role==='agent');
  const incoming=!live&&['incoming_call','call_offer'].includes(lastAgent?.card?.type)&&!lastAgent?.card?.closed;
  const decline=async()=>{try{await event({type:'call_declined'});}catch{setError('Couldn’t save that. Please try again.');}};
  const submit=e=>{e.preventDefault();if(!text.trim()||busy)return;send(text);setText('');};
- const reset=async()=>{if(live)endCall();try{await event({type:'forget'});setName('');setSheet(null);setView('text');setText('');}catch{setError('Couldn’t reset. Your conversation is still here.');}};
+ const reset=async()=>{if(live)endCall();try{await event({type:'forget'});setName('');setSheet(null);setView('text');setText('');setOpen(false);setTimeout(()=>settleVideo(4.6),500);}catch{setError('Couldn’t reset. Your conversation is still here.');}};
  return <div className={`experience ${open?'projecting':''}`}>
-  <header className="site-head"><a className="wordmark" href="/" aria-label="Persona home"><Mark/><span>Persona</span></a><span className="head-note">A little closer.</span><button className="demo-badge" onClick={()=>{setOpen(true);setSheet('about');}}>{config?.llm?'Connected':'Interactive preview'}<span/></button></header>
+  <header className="site-head"><a className="wordmark" href="/" aria-label="Persona home"><Mark/><span>Persona</span></a><span className="head-note">A little closer.</span><div className="head-actions"><button className="sound-toggle" onClick={()=>setSoundOn(v=>!v)} aria-label={soundOn?'Turn sound off':'Turn sound on'} aria-pressed={soundOn}>{soundOn?<Volume2 size={16}/>:<VolumeX size={16}/>}</button><button className="start-over" onClick={()=>{if(!open)setOpen(true);setSheet('reset');}}>Start over</button></div></header>
   <main className="world" ref={world}>
    <div className="world-title"><span className="overline">MEET YOUR PERSONA</span><h1>Your world.<br/>A little <em>lighter.</em></h1><p>One touch. A conversation that stays with you.</p></div>
-   <div className="film-stage">
-    <img className="band-surface" src="/band-poster.jpg" onLoad={()=>setMediaReady(true)} onError={()=>{setMediaReady(true);setMediaFailed(true);}} alt="Persona Band on a wrist" draggable="false"/>
-    <button ref={ring} className={`ring-hit ${mediaReady?'ready':''} ${live?'live':''}`} onClick={open?()=>setOpen(false):awaken} aria-label={open?'Minimize conversation':'Touch the ring to meet your Persona'} aria-expanded={open} aria-controls="projection" style={{'--level':level}}><span className="ring-light"/><span className="ring-ripple"/></button>
-    {!open&&<div className="touch-label"><span className="touch-stem"/><button onClick={awaken}>Touch the ring <ArrowUpRight size={13}/></button><small>{mediaFailed?'Video unavailable. You can still start here.':'Your Persona is right here.'}</small></div>}
+   <div className={`film-stage ${pressing?'pressing':''}`}>
+    <img className="band-surface poster" src="/band-poster.jpg" onLoad={()=>{if(!mediaReady)setMediaReady(true);}} onError={()=>{setMediaReady(true);setMediaFailed(true);}} alt="Persona Band on a wrist" draggable="false"/>
+    <video ref={video} className="band-surface film" src="/hero-1080.mp4" muted playsInline preload="auto" onLoadedMetadata={e=>{try{e.currentTarget.currentTime=4.6;}catch{}setMediaReady(true);}} onError={()=>{setMediaReady(true);setMediaFailed(true);}} aria-hidden="true"/>
+    <button ref={ring} className={`ring-hit ${mediaReady?'ready':''} ${open?'active':''} ${live?'live':''}`} onClick={open?minimize:awaken} aria-label={open?'Minimize to the ring':'Touch the ring to meet your Persona'} aria-expanded={open} aria-controls="projection" style={{'--level':level}}><span className="ring-light"/><span className="ring-ripple"/></button>
+    {!open&&!pressing&&<div className="touch-label"><span className="touch-stem"/><button onClick={awaken}>{state?.transcript?.length?'Pick up where we left off':'Touch the ring'} <ArrowUpRight size={13}/></button><small>{mediaFailed?'You can still start here.':state?.transcript?.length?'Nothing’s lost.':'Your Persona is right here.'}</small></div>}
    </div>
    <AnimatePresence>{open&&<motion.div ref={beam} className="projection-beam" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} transition={{duration:reduced?0:.22,delay:reduced?0:.08}} aria-hidden="true"/>}</AnimatePresence>
-   <AnimatePresence>{open&&<motion.section id="projection" ref={panel} className="projection glass" aria-label="Your Persona conversation" initial={reduced?{opacity:0}:{opacity:0,scale:.92,x:-35,y:48}} animate={{opacity:1,scale:1,x:0,y:0}} exit={{opacity:0,scale:.96,x:-16,y:20}} transition={{duration:reduced?0:.3,delay:reduced?0:.08,ease}}>
-    <header className="panel-head"><div className="avatar"><Mark/></div><div className="panel-identity"><strong>{agent}</strong><span><i className={live?'active':''}/>{live?muted?'Mic paused':status==='speaking'?'Speaking':status==='thinking'?'Thinking':'Listening':state?.agentName?'Here with you':'A first hello'}</span></div><button className="icon-button" onClick={()=>setSheet('memory')} aria-label="What Persona remembers"><span className="memory-symbol">···</span></button><button className="icon-button" onClick={()=>setOpen(false)} aria-label="Minimize conversation"><Minus size={17}/></button></header>
+   <AnimatePresence>{open&&<motion.section id="projection" ref={panel} className="projection glass" aria-label="Your Persona conversation" initial={reduced?{opacity:0}:{opacity:0,scale:.4,y:280,rotateX:-74}} animate={{opacity:1,scale:1,y:0,rotateX:3}} exit={{opacity:0,scale:.45,y:250,rotateX:-68}} transition={{duration:reduced?0:.56,delay:reduced?0:.2,ease}}>
+    <header className="panel-head"><div className="avatar ring-avatar"><span/></div><div className="panel-identity"><strong>{agent}</strong><span><i className={live?'active':''}/>{live?muted?'Mic paused':status==='speaking'?'Speaking':status==='thinking'?'Thinking':'Listening':state?.agentName?incoming?'Calling…':'Here with you':'A first hello'}</span></div><button className="icon-button" onClick={()=>setSheet('memory')} aria-label="What Persona remembers"><span className="memory-symbol">···</span></button><button className="icon-button" onClick={minimize} aria-label="Minimize to the ring"><Minus size={17}/></button></header>
     {error&&<div className="error" role="alert">{error}<button onClick={()=>setError('')} aria-label="Dismiss error"><X size={13}/></button></div>}
     {!state?<div className="loading">{error?'Please refresh to reconnect.':'Waking up…'}</div>:sheet?<div className="sheet-content"><button className="back" onClick={()=>setSheet(null)}><ChevronLeft size={15}/>Back to conversation</button>
      {sheet==='gmail'?<><div className="service-icon"><img src="/brand/gmail.svg" alt="Gmail"/></div><h2>A little context.<br/>A lot less explaining.</h2><p>Connect Gmail so {agent} can read recent senders, subjects, and previews with you.</p><div className="permission"><Lock size={15}/><span>Read-only access. No sending or deleting.<br/>A small inbox snapshot is shared with this app and its configured model.</span></div>{state.gmail.status==='connected'?<div className="connected"><Check size={16}/>{state.gmail.email}{state.gmail.simulated?' · sample':''}</div>:<div className="stack">{config?.googleClientId?<button className="primary" onClick={()=>gmail(false)} disabled={gmailBusy}>{gmailBusy?'Connecting…':'Continue with Google'}</button>:<><span className="sample-note">Google sign-in isn’t configured in this preview.</span><button className="primary" onClick={()=>gmail(true)} disabled={gmailBusy}>Explore a sample inbox</button></>}<button className="quiet" onClick={()=>{event({type:'gmail_skipped'}).catch(()=>setError('Please try again.'));setSheet(null);}}>Not now</button></div>}</>:sheet==='memory'?<><h2>The little things<br/>worth remembering.</h2><p>Picked up from our conversation.</p><dl>{[['Your Persona',state.agentName],['Your name',state.userName],['On your mind',state.need],['Gmail',state.gmail.status==='connected'?state.gmail.simulated?'Sample inbox':state.gmail.email:'Not connected']].map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v||'We’ll get to it.'}</dd></div>)}</dl><button className="quiet" onClick={()=>setSheet('reset')}><RotateCcw size={13}/>Start fresh</button></>:sheet==='reset'?<><h2>A fresh start?</h2><p>This removes your conversation, saved names, and inbox snapshot. It can’t be undone.</p><div className="stack"><button className="primary" onClick={reset}>Forget this conversation</button><button className="quiet" onClick={()=>setSheet('memory')}>Keep it</button></div></>:<><h2>Meet the experience.</h2><p>This is a working interaction prototype. {config?.llm?'Model replies are enabled.':'Conversation uses simple rules until a model key is added.'}</p><p>{config?.googleClientId?'Google sign-in is available.':'Gmail uses clearly marked sample messages until Google sign-in is configured.'}</p><p>Voice uses your browser’s microphone and speech features. Chrome or Edge works best.</p></>}
@@ -77,10 +90,10 @@ export default function App(){
      <form className="composer" onSubmit={submit}><button type="button" className="icon-button" onClick={live?()=>setView('voice'):startCall} aria-label={live?'Return to voice':'Start voice call'}><Mic size={18}/></button><input aria-label="Message your Persona" placeholder={`Tell ${agent} what’s on your mind`} value={text} onChange={e=>setText(e.target.value)} maxLength={2000}/><button className="send" disabled={!text.trim()||busy} aria-label="Send message"><ArrowUp size={17}/></button></form>
      </>}
     </>}
-    <footer className="panel-foot"><span className="tiny-dot"/>{live?'Voice and text, together.':config?.llm?'Your conversation is saved.':'Preview · rule-based replies'}<Lock size={10}/></footer>
+    <footer className="panel-foot"><span className="tiny-dot"/>{live?'Voice and text, together.':'Your conversation stays with you.'}<Lock size={10}/></footer>
    </motion.section>}</AnimatePresence>
   </main>
-  <footer className="site-foot"><span>Made to feel <em>personal.</em></span><button onClick={awaken}>{open?'Tap the ring to tuck this away.':'No forms. Just a first hello.'}</button><span>PERSONA · INTERACTIVE CONCEPT</span></footer>
+  <footer className="site-foot"><span>Made to feel <em>personal.</em></span><button onClick={open?minimize:awaken}>{open?'Tap the ring to tuck this away.':state?.transcript?.length?'Pick up here anytime.':'No forms. Just a first hello.'}</button><span>PERSONA</span></footer>
   {!open&&live&&<button className="floating-call" onClick={()=>setOpen(true)}><Phone size={15}/>{agent} · call in progress</button>}
  </div>;
 }

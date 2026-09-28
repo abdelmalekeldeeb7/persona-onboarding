@@ -37,3 +37,41 @@
  .world-title h1,.projecting .world-title h1{font-size:44px}
 }
 @media(prefers-reduced-motion:reduce){.film-stage{will-change:auto}.projection-beam{display:none}}
+
+/* Claude Design v7 integration: the interface rises from the band instead of
+   reading as a separate side panel. The server-backed interaction components
+   above remain unchanged. */
+@keyframes ringBreathe{0%,100%{box-shadow:0 0 7px 1px currentColor,inset 0 0 5px 1px currentColor;opacity:.82}50%{box-shadow:0 0 17px 5px currentColor,inset 0 0 11px 2px currentColor;opacity:1}}
+@keyframes ringPulse{0%,100%{box-shadow:0 0 9px 2px currentColor,inset 0 0 6px 1px currentColor}50%{box-shadow:0 0 28px 9px currentColor,inset 0 0 12px 3px currentColor}}
+.world{perspective:1400px;perspective-origin:50% 82%;overflow:hidden}
+.head-actions{display:flex;align-items:center;gap:14px}.sound-toggle{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;color:#55585f;background:#ffffffb3;backdrop-filter:blur(20px) saturate(1.8);-webkit-backdrop-filter:blur(20px) saturate(1.8);box-shadow:inset 0 1px 0 #fff,0 0 0 .5px #0000001f,0 4px 14px -6px #1c1f2626}.start-over{font-size:12px;color:#6e7178}.start-over:hover{color:#252527}
+.touch-label button{background:#fff;isolation:isolate}
+.film-stage,.projecting .film-stage{width:100vw;left:0;bottom:-7vw;transform-origin:49.05% 47.22%;transition:transform .6s cubic-bezier(.45,.05,.2,1) .08s;will-change:transform}
+.film-stage{transform:translate3d(0,0,0) rotate(0) scale(1)}
+.projecting .film-stage{transform:translate3d(.95vw,18vh,0) rotate(-1.5deg) scale(1.26)}
+.band-surface{position:absolute;inset:0}.band-surface.poster{z-index:0}.band-surface.film{z-index:1;display:block;width:100%;height:100%;object-fit:cover;opacity:1;mix-blend-mode:multiply}.film-stage:not(.pressing) .poster{opacity:0}.film-stage.pressing{transition:none}
+.ring-hit{z-index:4}.ring-hit .ring-light{inset:10%;color:#fff;animation:ringBreathe 4.2s ease-in-out infinite}.ring-hit.active .ring-light{color:#98f0b9;border:1.5px solid #fff;animation:ringBreathe 3.2s ease-in-out infinite}.ring-hit.live .ring-light{color:#8cefb1;animation:ringPulse 1.1s ease-in-out infinite}.projecting .ring-hit{opacity:1}
+.projecting .world-title{opacity:.3;filter:blur(3px);transform:translateY(-22px);transition:opacity .3s,filter .4s,transform .6s cubic-bezier(.45,.05,.2,1)}
+.projection{left:50%;right:auto;top:24px;translate:-50% 0;width:min(440px,calc(100vw - 80px));height:min(700px,calc(100dvh - 214px));transform-origin:50% 100%;border-radius:29px;overflow:hidden;backface-visibility:hidden}
+.glass{background:linear-gradient(150deg,#ffffffe6,#f7f9fbd9 50%,#eef2f6e2);backdrop-filter:blur(30px) saturate(1.35);-webkit-backdrop-filter:blur(30px) saturate(1.35);box-shadow:inset 0 1px 0 #fff,0 0 0 1px #d6dbe28c,0 30px 80px -30px #26303d47,0 3px 12px #00000006}
+.projection-beam{filter:none;background:linear-gradient(to top,#b8f0cc00 0%,#c4f2d599 16%,#d6ebdf66 45%,#ffffff70 100%);transform-origin:50% 100%;mix-blend-mode:screen}
+.projection-beam:after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,#ffffff00,#ffffff70 50%,#ffffff00);opacity:.35}
+.panel-head{height:72px;padding:0 20px 0 22px;position:relative;z-index:2;background:linear-gradient(#ffffff38,#ffffff00)}
+.ring-avatar{position:relative;width:30px;height:30px;border-radius:50%;background:radial-gradient(circle at 50% 35%,#3a3b40,#1f2023 70%);box-shadow:0 7px 20px -10px #1c1f2677}.ring-avatar span{position:absolute;inset:24%;border:1.5px solid #fff;border-radius:50%;color:#9fd6b3;animation:ringBreathe 3.2s ease-in-out infinite}
+.first-hello{padding:12px 32px 24px}.first-hello .hello-mark{display:none}.first-hello form{margin:28px 0 24px}.first-hello>small{display:none}
+.incoming .voice-orb,.voice-content .voice-orb{background:radial-gradient(circle at 50% 50%,#fff 0,#eef9f1 26%,#a9dbbb42 45%,transparent 72%);border:0;box-shadow:0 0 58px #9fd6b363}.incoming .voice-orb img,.voice-content .voice-orb img{display:none}.incoming .voice-orb span,.voice-content .voice-orb span{inset:25%;border-color:#fff;box-shadow:0 0 18px #9fd6b3}
+.messages{padding-top:14px}.message>p{color:#555b65}.composer{background:#ffffffe0}.panel-foot{padding:10px 12px 12px}
+.site-foot>span:last-child{letter-spacing:.18em}
+@media(min-width:1600px){.projection{left:50%;right:auto;top:40px}.projecting .film-stage{width:100vw;left:0}}
+@media(max-width:1050px){.projection{left:50%;right:auto;width:min(440px,calc(100vw - 80px))}.projecting .film-stage{width:100vw;left:0}.projecting .world-title{opacity:.18}}
+@media(max-width:650px){
+ .head-actions{gap:10px}.start-over{font-size:10px}.sound-toggle{width:34px;height:34px}
+ .film-stage,.projecting .film-stage{width:180vw;left:-40vw;bottom:14vh;opacity:1}
+ .projecting .film-stage{transform:translate3d(0,16vh,0) rotate(-1.5deg) scale(1.12)}
+ .projection{left:14px;right:auto;top:8px;translate:0 0;width:calc(100% - 28px);height:calc(100dvh - 162px);max-height:none;transform-origin:50% 100%;border-radius:26px}
+ .glass{background:linear-gradient(150deg,#fffffff0,#f7f9fbe6 55%,#eef2f6ed)}
+ .projection-beam{display:block;opacity:.6}
+ .first-hello{padding:4px 26px 18px}.first-hello form{margin:20px 0 8px}
+}
+@media(max-height:680px) and (min-width:651px){.projection{top:0;width:400px;height:calc(100dvh - 148px)}.projecting .film-stage{transform:translate3d(.95vw,18vh,0) rotate(-1.5deg) scale(1.12)}.first-hello{padding-top:4px}.first-hello form{margin:16px 0 8px}}
+@media(prefers-reduced-motion:reduce){.projection-beam{display:none}.film-stage{will-change:auto}.ring-hit .ring-light{animation:none}}
