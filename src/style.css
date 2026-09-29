@@ -54,3 +54,22 @@
 .exact-voice .exact-suggestions{margin-top:10px}
 .exact-voice .exact-gmail-nudge{max-width:340px}
 
+
+/* Conversation history, Codex-style: a quiet rail on wide panels, a sheet on phones. */
+.exact-panel.wide .exact-conversation.has-threads{grid-template-columns:196px minmax(0,1fr) 270px}
+.exact-threads{min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;padding:18px 12px 14px;border-right:1px solid #dfe3e955;background:linear-gradient(170deg,#f6f8fb99,#eef2f699);overflow:hidden}
+.exact-newchat{display:flex;align-items:center;gap:8px;width:100%;padding:9px 11px;border:1px solid #dfe3e9;border-radius:11px;background:#fffc;font-size:11px;color:#59615d;transition:background .2s,transform .2s}
+.exact-newchat:hover:not(:disabled){background:#fff;transform:translateY(-1px)}
+.exact-newchat:disabled{opacity:.55}
+.exact-threads .exact-overline,.exact-threads-sheet .exact-overline{margin:8px 4px 0}
+.exact-thread-list{display:flex;flex-direction:column;gap:2px;overflow-y:auto;min-height:0;margin:0 -4px;padding:0 4px}
+.exact-thread-item{display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;text-align:left;padding:8px 9px;border-radius:9px;background:none;border:0;cursor:pointer;transition:background .15s}
+.exact-thread-item:hover{background:#ffffff9e}
+.exact-thread-item.current{background:#fff;box-shadow:0 1px 0 #e3e7ed}
+.exact-thread-item strong{font-size:11px;font-weight:500;color:#5b625f;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.exact-thread-item small{font-size:9px;color:#a2a8b1;letter-spacing:.02em}
+.exact-thread-empty{font-size:10px;color:#a2a8b1;line-height:1.6;padding:6px 5px}
+.exact-threads-sheet{display:flex;flex-direction:column;gap:12px;min-height:0}
+.exact-threads-sheet .exact-thread-list{max-height:52vh}
+.exact-threads-sheet .exact-thread-item strong{font-size:13px}
+.exact-threads-sheet .exact-thread-item small{font-size:10px}

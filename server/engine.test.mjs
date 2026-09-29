@@ -323,3 +323,23 @@ test('a real name on the naming screen names the agent without the model', async
   assert.equal(s.agentName, 'Nova');
   assert.equal(s.userName, null);
 });
+
+test('new chat carries identity but not the conversation; sidebar titles come from the need', async () => {
+  const { carryOver, threadSummary } = await import('./engine.mjs');
+  const a = newSession();
+  a.agentName = 'Nova'; a.userName = 'Sam'; a.need = 'Plan the week around three meetings';
+  a.gmail.status = 'connected'; a.gmail.email = 'sam@example.com';
+  a.connectors = { notion: 'requested' };
+  await handleTurn(a, { text: 'I need to plan my week', via: 'text' });
+  const b = newSession();
+  carryOver(a, b);
+  assert.equal(b.agentName, 'Nova');
+  assert.equal(b.userName, 'Sam');
+  assert.equal(b.need, null);
+  assert.equal(b.gmail.status, 'connected');
+  assert.equal(b.connectors.notion, 'requested');
+  assert.equal(b.phase, 'main');
+  assert.equal(b.transcript.filter((m) => m.role === 'user').length, 0);
+  assert.equal(threadSummary(b), null); // empty threads stay out of the sidebar
+  assert.equal(threadSummary(a).title, 'Plan the week around three meetings');
+});

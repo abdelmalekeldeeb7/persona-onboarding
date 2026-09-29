@@ -313,6 +313,39 @@ export async function handleEvent(s, ev) {
 }
 
 // Public, trimmed view for the client.
+// A new conversation for the same person: identity and connections carry over, the thread starts fresh.
+export function carryOver(from, s) {
+  s.agentName = from.agentName || null;
+  s.userName = from.userName || null;
+  s.gmail = { ...s.gmail, ...structuredClone(from.gmail || {}), asks: 0, askedAtTurn: -99, reoffered: false };
+  s.connectors = structuredClone(from.connectors || {});
+  s.caps = from.caps;
+  s.style = from.style;
+  s.context = from.context;
+  s.refusesCalls = !!from.refusesCalls;
+  s.onboardingSkipped = !!from.onboardingSkipped || !!s.agentName;
+  s.phase = s.onboardingSkipped ? 'main' : 'name_agent';
+  if (s.onboardingSkipped) {
+    push(s, { role: 'agent', via: 'text', text: `New conversation${s.userName ? `, ${s.userName}` : ''}. What’s on your mind?`, suggest: SUGGEST.skip_start });
+  }
+}
+
+// One row in the sidebar. Empty threads are hidden.
+export function threadSummary(s) {
+  const said = (s.transcript || []).filter((m) => m.role === 'user');
+  if (!said.length) return null;
+  const firstReal = said.find((m) => m.text && m.text.split(/\s+/).length > 2) || said[0];
+  const title = (s.need || firstReal.text || 'Conversation').replace(/\s+/g, ' ').trim();
+  const last = [...s.transcript].reverse().find((m) => m.role !== 'system');
+  return {
+    id: s.id,
+    title: (title.length > 48 ? title.slice(0, 47) + '…' : title).replace(/^\p{Ll}/u, (c) => c.toUpperCase()),
+    preview: (last?.text || '').replace(/\s+/g, ' ').slice(0, 80),
+    updatedAt: s.updatedAt || s.createdAt || 0,
+    voice: (s.call?.count || 0) > 0,
+  };
+}
+
 export function publicState(s) {
   return {
     id: s.id,

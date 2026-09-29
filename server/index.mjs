@@ -2,8 +2,8 @@ import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { initStore, getSession, saveSession } from './store.mjs';
-import { newSession, handleTurn, handleEvent, publicState } from './engine.mjs';
+import { initStore, getSession, saveSession, listSessions } from './store.mjs';
+import { newSession, handleTurn, handleEvent, publicState, carryOver, threadSummary } from './engine.mjs';
 import { llmEnabled, llmProvider, ttsEnabled, speakCached, prefetchSpeech, warmKokoro } from './llm.mjs';
 
 const app = express();
@@ -116,8 +116,19 @@ app.post('/api/session', async (req, res) => {
   if (limited(res, `new:${req.ip}`, 20)) return;
   const s = newSession();
   s.owner = hash(ownerToken(req, res));
+  // "New chat" keeps who you are (names, Gmail, connectors) from one of your own conversations.
+  const from = typeof req.body?.carryFrom === 'string' && ID_RE.test(req.body.carryFrom) ? await getSession(req.body.carryFrom) : null;
+  if (from && owns(req, from)) carryOver(from, s);
   await saveSession(s);
   res.json({ state: publicState(s) });
+});
+
+app.get('/api/sessions', async (req, res) => {
+  const t = readCookie(req);
+  if (!t) return res.json({ threads: [] });
+  if (limited(res, `list:${req.ip}`, 60)) return;
+  const all = await listSessions(hash(t), 30);
+  res.json({ threads: all.map(threadSummary).filter(Boolean) });
 });
 
 app.get('/api/session/:id', async (req, res) => {

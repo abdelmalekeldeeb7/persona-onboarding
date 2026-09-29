@@ -29,6 +29,7 @@ export type State = {
 };
 
 export type Reply = { state: State; messages: Msg[] };
+export type Thread = { id: string; title: string; preview: string; updatedAt: number; voice: boolean };
 
 const KEY = 'persona.projection.session';
 
@@ -80,6 +81,17 @@ export const api = {
   },
   async fresh(): Promise<Reply> {
     const r = await req<{ state: State }>('/api/session', {});
+    safeSet(KEY, r.state.id);
+    return { state: r.state, messages: [] };
+  },
+  threads: () => req<{ threads: Thread[] }>('/api/sessions', undefined, 1),
+  async open(id: string): Promise<Reply> {
+    const r = await req<Reply>(`/api/session/${id}`);
+    safeSet(KEY, r.state.id);
+    return { state: r.state, messages: r.messages ?? [] };
+  },
+  async newChat(carryFrom?: string): Promise<Reply> {
+    const r = await req<{ state: State }>('/api/session', { carryFrom });
     safeSet(KEY, r.state.id);
     return { state: r.state, messages: [] };
   },

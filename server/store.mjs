@@ -64,3 +64,19 @@ export async function saveSession(s) {
   mem.set(s.id, structuredClone(s));
   flushFile();
 }
+
+// The owner's recent conversations, newest first (the sidebar). Owner is the hashed cookie token.
+export async function listSessions(owner, limit = 30) {
+  if (pool) {
+    const r = await pool.query(
+      `select data from sessions where data->>'owner' = $1 order by updated_at desc limit $2`,
+      [owner, limit]
+    );
+    return r.rows.map((x) => x.data);
+  }
+  return [...mem.values()]
+    .filter((s) => s.owner === owner)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    .slice(0, limit)
+    .map((s) => structuredClone(s));
+}
